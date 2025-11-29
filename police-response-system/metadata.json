@@ -1,0 +1,5 @@
+{
+  "name": "Police Response System",
+  "description": "A dashboard for police officers to receive and respond to emergency alerts. It features real-time notifications, manual incident triggering, and location sharing upon case acceptance.",
+  "requestFramePermissions": ["geolocation"]
+}
