@@ -2,8 +2,6 @@ from django.db import models
 from django.conf import settings
 from django.core.validators import RegexValidator
 
-
-
 class EmergencyContact(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, 
                            related_name='emergency_contacts')
@@ -76,10 +74,6 @@ class EmergencySettings(models.Model):
     
     def __str__(self):
         return f"Settings for {self.user.full_name}"
-    
-
-
-
 
 class OfficerLocation(models.Model):
     officer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
@@ -93,7 +87,6 @@ class OfficerLocation(models.Model):
 
     def __str__(self):
         return f"{self.officer.email} -> {self.emergency.id}"
-
 
 class HighRiskZone(models.Model):
     RISK_LEVELS = [
@@ -120,3 +113,49 @@ class HighRiskZone(models.Model):
     
     class Meta:
         ordering = ['-risk_level', '-last_incident']
+
+class PoliceOfficer(models.Model):
+    STATUS_CHOICES = [
+        ('available', 'Available'),
+        ('busy', 'Busy'),
+        ('offline', 'Offline'),
+        ('en_route', 'En Route'),
+        ('on_scene', 'On Scene'),
+    ]
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='officer_profile')
+    badge_number = models.CharField(max_length=20, unique=True)
+    rank = models.CharField(max_length=50, default='Officer')
+    station = models.CharField(max_length=100, default='Main Station')
+    is_active = models.BooleanField(default=True)
+    current_latitude = models.DecimalField(max_digits=10, decimal_places=8, null=True, blank=True)
+    current_longitude = models.DecimalField(max_digits=11, decimal_places=8, null=True, blank=True)
+    last_location_update = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='offline')
+    
+    def __str__(self):
+        return f"{self.rank} {self.user.full_name} ({self.badge_number})"
+
+class DispatchTask(models.Model):
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('accepted', 'Accepted'),
+        ('declined', 'Declined'),
+        ('en_route', 'En Route'),
+        ('arrived', 'Arrived'),
+        ('resolved', 'Resolved'),
+    ]
+
+    emergency = models.ForeignKey(EmergencyAlert, on_delete=models.CASCADE, related_name='dispatch_tasks')
+    officer = models.ForeignKey(PoliceOfficer, on_delete=models.CASCADE, related_name='tasks')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['-assigned_at']
+
+    def __str__(self):
+        return f"Task: {self.officer.badge_number} -> {self.emergency.id} ({self.status})"

@@ -9,7 +9,7 @@ class WebSocketService {
   void connect(int userId) {
     try {
       _channel = WebSocketChannel.connect(
-        Uri.parse('ws://192.168.1.13:8000/ws/user/$userId/'),
+        Uri.parse('ws://192.168.1.8:8000/ws/user/$userId/'),
       );
 
       _channel!.stream.listen(

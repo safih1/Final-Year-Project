@@ -2,8 +2,15 @@ from django.contrib.auth.models import AbstractUser
 from django.db import models
 
 class User(AbstractUser):
+    ROLE_CHOICES = [
+        ('regular_user', 'Regular User'),
+        ('mobile_officer', 'Mobile Officer'),
+        ('admin', 'Admin'),
+    ]
+    
     email = models.EmailField(unique=True)
     full_name = models.CharField(max_length=100)
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='regular_user')
     is_admin = models.BooleanField(default=False)
     phone_number = models.CharField(max_length=15, blank=True, null=True)
     profile_picture = models.ImageField(upload_to='profiles/', blank=True, null=True)

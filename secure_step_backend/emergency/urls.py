@@ -1,5 +1,6 @@
 from django.urls import path
 from . import views
+from . import police_views
 
 urlpatterns = [
     # Emergency Contacts CRUD
@@ -18,6 +19,15 @@ urlpatterns = [
     # Admin Views
     path('admin/alerts/', views.admin_emergency_alerts, name='admin_emergency_alerts'),
     path('admin/contacts/', views.admin_all_contacts, name='admin_all_contacts'),
-    path("api/officer/update-location/", views.update_officer_location, name="update_officer_location"),
     path('high-risk-zones/', views.get_high_risk_zones, name='high_risk_zones'),
+
+    # Police API Endpoints
+    path('police/register/', police_views.police_register, name='police_register'),
+    path('police/login/', police_views.police_login, name='police_login'),
+    path('police/officers/available/', police_views.get_available_officers, name='get_available_officers'),
+    path('police/officers/location/', police_views.update_officer_location_new, name='update_officer_location'),
+    path('police/nearest/<int:emergency_id>/', police_views.get_nearest_officer, name='get_nearest_officer'),
+    path('police/dispatch/assign/', police_views.assign_officer, name='assign_officer'),
+    path('police/dispatch/tasks/', police_views.get_officer_tasks, name='get_officer_tasks'),
+    path('police/dispatch/tasks/<int:pk>/status/', police_views.update_task_status, name='update_task_status'),
 ]

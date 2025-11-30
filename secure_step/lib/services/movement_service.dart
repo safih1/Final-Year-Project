@@ -21,7 +21,7 @@ class MovementService {
   double _age = 25, _height = 170, _weight = 70;
 
   // API URL - Updated to point to Django backend
-  final String API_URL = 'http://192.168.1.13:8000/api/emergency/predict/';
+  final String API_URL = 'http://192.168.1.8:8000/api/emergency/predict/';
 
   Function(String action, double confidence, bool isThreat)? onPredictionResult;
 

@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SecureStep Police Dispatch</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        #login-screen { display: flex; justify-content: center; align-items: center; height: 100vh; background: #f0f2f5; }
+        .login-box { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 300px; }
+        .login-box h2 { text-align: center; color: #1a73e8; margin-bottom: 1.5rem; }
+        .form-group { margin-bottom: 1rem; }
+        .form-group label { display: block; margin-bottom: 0.5rem; color: #5f6368; }
+        .form-group input { width: 100%; padding: 0.5rem; border: 1px solid #dadce0; border-radius: 4px; box-sizing: border-box; }
+        button { width: 100%; padding: 0.75rem; background: #1a73e8; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; }
+        button:hover { background: #1557b0; }
+        
+        #dashboard { display: none; height: 100vh; display: flex; flex-direction: column; }
+        header { background: #1a73e8; color: white; padding: 1rem; display: flex; justify-content: space-between; align-items: center; }
+        .main-content { display: flex; flex: 1; overflow: hidden; }
+        #map { flex: 2; height: 100%; }
+        #sidebar { flex: 1; background: white; border-left: 1px solid #dadce0; padding: 1rem; overflow-y: auto; max-width: 400px; }
+        
+        .officer-card { padding: 1rem; border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 1rem; background: #fff; }
+        .officer-card.free { border-left: 4px solid #34a853; }
+        .officer-card.assigned { border-left: 4px solid #ea4335; }
+        .officer-header { display: flex; justify-content: space-between; margin-bottom: 0.5rem; }
+        .badge { background: #f1f3f4; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.8rem; }
+        .status { font-weight: bold; }
+        .status.free { color: #34a853; }
+        .status.assigned { color: #ea4335; }
+        
+        .emergency-alert { background: #fce8e6; border: 1px solid #ea4335; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(234, 67, 53, 0.4); } 70% { box-shadow: 0 0 0 10px rgba(234, 67, 53, 0); } 100% { box-shadow: 0 0 0 0 rgba(234, 67, 53, 0); } }
+        
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; }
+        .modal-content { background: white; margin: 10% auto; padding: 2rem; width: 50%; border-radius: 8px; max-width: 600px; }
+        .close { float: right; font-size: 1.5rem; cursor: pointer; }
+        
+        .officer-list-item { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem; border-bottom: 1px solid #eee; }
+        .assign-btn { width: auto; padding: 0.25rem 0.75rem; font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+    <div id="login-screen">
+        <div class="login-box">
+            <h2>Police Dispatch Login</h2>
+            <form id="login-form">
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="email" required>
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="password" required>
+                </div>
+                <button type="submit">Login</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="dashboard" style="display: none;">
+        <header>
+            <h1>SecureStep Dispatch</h1>
+            <button onclick="logout()" style="width: auto; background: rgba(255,255,255,0.2);">Logout</button>
+        </header>
+        <div class="main-content">
+            <div id="map"></div>
+            <div id="sidebar">
+                <h2>Active Emergencies</h2>
+                <div id="emergency-list"></div>
+                <h2>Available Officers</h2>
+                <div id="officer-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="dispatch-modal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal()">&times;</span>
+            <h2>Assign Officer</h2>
+            <p>Select the nearest available officer for this emergency:</p>
+            <div id="nearest-officers-list"></div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const API_URL = 'http://192.168.1.8:8000/api/emergency'; // Update with your IP
+        let map, markers = {};
+        let authToken = localStorage.getItem('admin_token');
+        let currentEmergencyId = null;
+
+        // Initialize
+        if (authToken) {
+            showDashboard();
+        }
+
+        // Login Handler
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                const response = await fetch('http://192.168.1.8:8000/api/accounts/login/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.user.is_admin) {
+                        authToken = data.tokens.access;
+                        localStorage.setItem('admin_token', authToken);
+                        showDashboard();
+                    } else {
+                        alert('Access denied: Admin privileges required');
+                    }
+                } else {
+                    alert('Login failed');
+                }
+            } catch (error) {
+                console.error('Login error:', error);
+                alert('Connection error');
+            }
+        });
+
+        function showDashboard() {
+            document.getElementById('login-screen').style.display = 'none';
+            document.getElementById('dashboard').style.display = 'flex';
+            initMap();
+            startPolling();
+        }
+
+        function initMap() {
+            map = L.map('map').setView([34.1688, 73.2215], 13); // Default to Abbottabad
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+        }
+
+        function logout() {
+            localStorage.removeItem('admin_token');
+            location.reload();
+        }
+
+        async function fetchOfficers() {
+            try {
+                const response = await fetch(`${API_URL}/police/officers/available/`, {
+                    headers: { 'Authorization': `Bearer ${authToken}` }
+                });
+                if (response.ok) {
+                    const officers = await response.json();
+                    updateOfficerList(officers);
+                    updateMapMarkers(officers);
+                }
+            } catch (error) {
+                console.error('Error fetching officers:', error);
+            }
+        }
+
+        function updateOfficerList(officers) {
+            const list = document.getElementById('officer-list');
+            list.innerHTML = officers.map(officer => `
+                <div class="officer-card ${officer.status}">
+                    <div class="officer-header">
+                        <span class="badge">${officer.badge_number}</span>
+                        <span class="status ${officer.status}">${officer.status.toUpperCase()}</span>
+                    </div>
+                    <div>${officer.name}</div>
+                    <small>Last update: ${new Date(officer.last_update).toLocaleTimeString()}</small>
+                </div>
+            `).join('');
+        }
+
+        function updateMapMarkers(officers) {
+            // Clear existing markers
+            Object.values(markers).forEach(marker => map.removeLayer(marker));
+            markers = {};
+
+            officers.forEach(officer => {
+                if (officer.location.latitude && officer.location.longitude) {
+                    const icon = L.divIcon({
+                        className: 'custom-div-icon',
+                        html: `<div style="background-color:${officer.status === 'free' ? '#34a853' : '#ea4335'}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white;"></div>`,
+                        iconSize: [16, 16],
+                        iconAnchor: [8, 8]
+                    });
+
+                    const marker = L.marker([officer.location.latitude, officer.location.longitude], { icon })
+                        .bindPopup(`<b>${officer.name}</b><br>Badge: ${officer.badge_number}<br>Status: ${officer.status}`)
+                        .addTo(map);
+                    markers[officer.id] = marker;
+                }
+            });
+        }
+
+        // Poll for updates every 5 seconds
+        function startPolling() {
+            fetchOfficers();
+            setInterval(fetchOfficers, 5000);
+            
+            // Also poll for emergencies (simplified for demo, ideally use WebSocket)
+            fetchEmergencies();
+            setInterval(fetchEmergencies, 10000);
+        }
+
+        async function fetchEmergencies() {
+            try {
+                const response = await fetch(`${API_URL}/admin/alerts/`, {
+                    headers: { 'Authorization': `Bearer ${authToken}` }
+                });
+                if (response.ok) {
+                    const alerts = await response.json();
+                    const activeAlerts = alerts.filter(a => a.status === 'active');
+                    updateEmergencyList(activeAlerts);
+                }
+            } catch (error) {
+                console.error('Error fetching alerts:', error);
+            }
+        }
+
+        function updateEmergencyList(alerts) {
+            const list = document.getElementById('emergency-list');
+            list.innerHTML = alerts.map(alert => `
+                <div class="emergency-alert">
+                    <h3>🚨 EMERGENCY #${alert.id}</h3>
+                    <p><strong>User:</strong> ${alert.user_name || 'Unknown'}</p>
+                    <p><strong>Location:</strong> ${alert.location_address || 'Lat: ' + alert.location_latitude + ', Lng: ' + alert.location_longitude}</p>
+                    <p><strong>Time:</strong> ${new Date(alert.created_at).toLocaleTimeString()}</p>
+                    <button onclick="openDispatchModal(${alert.id})">Dispatch Officer</button>
+                </div>
+            `).join('');
+            
+            // Add markers for emergencies
+            alerts.forEach(alert => {
+                if (alert.location_latitude && alert.location_longitude) {
+                     L.marker([alert.location_latitude, alert.location_longitude], {
+                        icon: L.divIcon({
+                            html: '<div style="font-size: 24px;">🚨</div>',
+                            className: 'emergency-icon',
+                            iconSize: [30, 30],
+                            iconAnchor: [15, 15]
+                        })
+                    }).addTo(map).bindPopup(`Emergency #${alert.id}`);
+                }
+            });
+        }
+
+        async function openDispatchModal(emergencyId) {
+            currentEmergencyId = emergencyId;
+            document.getElementById('dispatch-modal').style.display = 'block';
+            
+            try {
+                const response = await fetch(`${API_URL}/police/nearest/${emergencyId}/`, {
+                    headers: { 'Authorization': `Bearer ${authToken}` }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    const list = document.getElementById('nearest-officers-list');
+                    
+                    let html = `<h3>Nearest Officer:</h3>
+                        <div class="officer-list-item" style="background: #e8f0fe; border: 2px solid #1a73e8; border-radius: 4px;">
+                            <div>
+                                <strong>${data.nearest_officer.name}</strong> (${data.nearest_officer.badge_number})<br>
+                                <small>${data.nearest_officer.distance_km} km away</small>
+                            </div>
+                            <button class="assign-btn" onclick="assignOfficer(${data.nearest_officer.id})">Assign Now</button>
+                        </div>
+                        <h3>Other Available Officers:</h3>`;
+                        
+                    html += data.all_available_officers
+                        .filter(o => o.id !== data.nearest_officer.id)
+                        .map(o => `
+                            <div class="officer-list-item">
+                                <div>
+                                    <strong>${o.name}</strong> (${o.badge_number})<br>
+                                    <small>${o.distance_km} km away</small>
+                                </div>
+                                <button class="assign-btn" onclick="assignOfficer(${o.id})">Assign</button>
+                            </div>
+                        `).join('');
+                        
+                    list.innerHTML = html;
+                }
+            } catch (error) {
+                console.error('Error fetching nearest officers:', error);
+                document.getElementById('nearest-officers-list').innerHTML = '<p>Error calculating nearest officers.</p>';
+            }
+        }
+
+        async function assignOfficer(officerId) {
+            if (!confirm('Confirm assignment?')) return;
+            
+            try {
+                const response = await fetch(`${API_URL}/police/dispatch/assign/`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        officer_id: officerId,
+                        emergency_id: currentEmergencyId
+                    })
+                });
+                
+                if (response.ok) {
+                    alert('Officer assigned successfully!');
+                    closeModal();
+                    fetchOfficers(); // Refresh lists
+                    fetchEmergencies();
+                } else {
+                    alert('Failed to assign officer');
+                }
+            } catch (error) {
+                console.error('Assignment error:', error);
+                alert('Error assigning officer');
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('dispatch-modal').style.display = 'none';
+            currentEmergencyId = null;
+        }
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            if (event.target == document.getElementById('dispatch-modal')) {
+                closeModal();
+            }
+        }
+    </script>
+</body>
+</html>

@@ -14,7 +14,7 @@ class AudioService {
   bool _isRecording = false;
 
   // API URL
-  final String API_URL = 'http://192.168.1.13:8000/api/emergency/predict-audio/';
+  final String API_URL = 'http://192.168.1.8:8000/api/emergency/predict-audio/';
 
   Function(bool isThreat, double confidence)? onPredictionResult;
 
