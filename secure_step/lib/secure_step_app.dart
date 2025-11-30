@@ -185,14 +185,14 @@ class _SecureStepAppState extends State<SecureStepApp> {
           hintStyle: const TextStyle(color: Colors.white54),
         ),
         switchTheme: SwitchThemeData(
-          thumbColor: MaterialStateProperty.resolveWith<Color>((states) {
-            if (states.contains(MaterialState.selected)) {
+          thumbColor: WidgetStateProperty.resolveWith<Color>((states) {
+            if (states.contains(WidgetState.selected)) {
               return const Color(0xFF6B48FF);
             }
             return Colors.grey;
           }),
-          trackColor: MaterialStateProperty.resolveWith<Color>((states) {
-            if (states.contains(MaterialState.selected)) {
+          trackColor: WidgetStateProperty.resolveWith<Color>((states) {
+            if (states.contains(WidgetState.selected)) {
               return const Color(0xFF6B48FF).withOpacity(0.5);
             }
             return Colors.grey.withOpacity(0.5);

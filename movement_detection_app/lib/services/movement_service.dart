@@ -9,7 +9,7 @@ class MovementService {
   factory MovementService() => _instance;
   MovementService._internal();
 
-  List<List<double>> _sensorData = [];
+  final List<List<double>> _sensorData = [];
   StreamSubscription? _gyroSub, _accelSub;
   
   double _gyroX = 0, _gyroY = 0, _gyroZ = 0;

@@ -28,7 +28,11 @@ SECRET_KEY = config(SECRET_KEY, default='your-secret-key-here')
 DEBUG = config('DEBUG', default=True, cast=bool)
 # DEBUG = True
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = [
+    'localhost',
+    '127.0.0.1',
+    '192.168.1.5',  # Your laptop's IP
+]
 
 
 # Application definition
@@ -174,7 +178,6 @@ ALLOWED_HOSTS = [
     '*',  # For development
     '127.0.0.1',
     'localhost',
-    '192.168.1.13',  # Your computer's IP
 ]
 
 CORS_ALLOW_CREDENTIALS = True
