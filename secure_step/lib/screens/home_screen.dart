@@ -239,16 +239,16 @@ class _HomeScreenState extends State<HomeScreen> {
 
     try {
       final position = await _getCurrentPosition();
-      final double _currentLat = position.latitude;
-      final double _currentLng = position.longitude;
+      final double currentLat = position.latitude;
+      final double currentLng = position.longitude;
       final String currentLocation =
-          "Lat: ${_currentLat.toStringAsFixed(5)}, Lng: ${_currentLng.toStringAsFixed(5)}";
+          "Lat: ${currentLat.toStringAsFixed(5)}, Lng: ${currentLng.toStringAsFixed(5)}";
 
       final result = await _apiService.triggerEmergency(
         alertType: 'manual',
         address: currentLocation,
-        latitude: _currentLat,
-        longitude: _currentLng,
+        latitude: currentLat,
+        longitude: currentLng,
         description: 'Manual emergency trigger from app',
       );
 
@@ -261,8 +261,8 @@ class _HomeScreenState extends State<HomeScreen> {
               'Unknown User',
           location: currentLocation,
           coordinates: {
-            'lat': _currentLat,
-            'lng': _currentLng,
+            'lat': currentLat,
+            'lng': currentLng,
           },
         );
 

@@ -16,7 +16,7 @@ class CombinedDetectionService {
 
   // Recording state
   bool _isRecording = false;
-  List<List<double>> _sensorData = [];
+  final List<List<double>> _sensorData = [];
   StreamSubscription? _gyroSub, _accelSub;
 
   // Sensor values

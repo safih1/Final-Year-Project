@@ -5,12 +5,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/high_risk_zone.dart';
 
 class ApiService {
-  static const String baseUrl = 'http://192.168.1.13:8000/api';
+  static const String baseUrl = 'http://127.0.0.1:8080/api';
 
-  // ==============================
   // TOKEN MANAGEMENT
-  // ==============================
-
   Future<String?> getToken() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString('access_token');

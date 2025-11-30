@@ -1,12 +1,8 @@
 import 'dart:async';
 import 'dart:ui';
-import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:speech_to_text/speech_to_text.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'movement_service.dart';
-import 'audio_service.dart';
 import 'combined_detection_service.dart';
 class BackgroundService {
   static final BackgroundService _instance = BackgroundService._internal();
