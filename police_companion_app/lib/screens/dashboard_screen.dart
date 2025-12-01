@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -15,17 +16,14 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  final Completer<GoogleMapController> _controller = Completer();
-  final _apiService = ApiService();
-  final _storage = const FlutterSecureStorage();
-  
+  final MapController _mapController = MapController();
+  final ApiService _apiService = ApiService();
+  final FlutterSecureStorage _storage = const FlutterSecureStorage();
+
   List<dynamic> _tasks = [];
-  Set<Marker> _markers = {};
-  CameraPosition _initialPosition = const CameraPosition(
-    target: LatLng(34.1688, 73.2215),
-    zoom: 14.4746,
-  );
-  
+  List<Marker> _markers = [];
+  LatLng _initialPosition = const LatLng(34.1688, 73.2215);
+
   WebSocketChannel? _channel;
   StreamSubscription? _locationSubscription;
 
@@ -35,7 +33,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _loadTasks();
     _getCurrentLocation();
     _connectWebSocket();
-    
     // Listen to background service updates
     FlutterBackgroundService().on('update').listen((event) {
       if (event != null && event['lat'] != null && event['lng'] != null) {
@@ -48,15 +45,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     try {
       Position position = await Geolocator.getCurrentPosition();
       setState(() {
-        _initialPosition = CameraPosition(
-          target: LatLng(position.latitude, position.longitude),
-          zoom: 15,
-        );
+        _initialPosition = LatLng(position.latitude, position.longitude);
       });
       _updateMyMarker(position.latitude, position.longitude);
-      
-      final GoogleMapController controller = await _controller.future;
-      controller.animateCamera(CameraUpdate.newCameraPosition(_initialPosition));
+      _mapController.move(_initialPosition, 15.0);
     } catch (e) {
       print('Error getting location: $e');
     }
@@ -64,42 +56,50 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   void _updateMyMarker(double lat, double lng) {
     setState(() {
-      _markers.removeWhere((m) => m.markerId.value == 'me');
+      // Remove previous location marker
+      _markers.removeWhere((m) => m.point == _initialPosition);
       _markers.add(
         Marker(
-          markerId: const MarkerId('me'),
-          position: LatLng(lat, lng),
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
-          infoWindow: const InfoWindow(title: 'My Location'),
+          point: LatLng(lat, lng),
+          width: 50,
+          height: 50,
+          child: const Icon(
+            Icons.my_location,
+            color: Colors.blue,
+            size: 40,
+          ),
         ),
       );
     });
   }
 
   Future<void> _connectWebSocket() async {
-    final officerId = await _storage.read(key: 'officer_id');
-    if (officerId == null) return;
-
-    // Connect to WebSocket
-    final wsUrl = 'ws://192.168.1.8:8000/ws/police/$officerId/';
-    _channel = WebSocketChannel.connect(Uri.parse(wsUrl));
-
-    _channel!.stream.listen((message) {
-      print('WebSocket message: $message');
-      // Handle new task assignment
-      _loadTasks();
-      
-      // Show SnackBar with alert sound
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('🚨 NEW TASK ASSIGNED! Check your dashboard'),
-          backgroundColor: Colors.red,
-          duration: Duration(seconds: 10),
-        ),
-      );
-    }, onError: (error) {
-      print('WebSocket error: $error');
-    });
+    try {
+      final officerId = await _storage.read(key: 'officer_id');
+      if (officerId == null) {
+        print('No officer ID found');
+        return;
+      }
+      final wsUrl = 'ws://192.168.1.8:8000/ws/police/$officerId/';
+      _channel = WebSocketChannel.connect(Uri.parse(wsUrl));
+      _channel!.stream.listen((message) {
+        print('WebSocket message: $message');
+        _loadTasks();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('🚨 NEW TASK ASSIGNED! Check your dashboard'),
+              backgroundColor: Colors.red,
+              duration: Duration(seconds: 10),
+            ),
+          );
+        }
+      }, onError: (error) {
+        print('WebSocket error: $error');
+      }, cancelOnError: false);
+    } catch (e) {
+      print('Error connecting to WebSocket: $e');
+    }
   }
 
   Future<void> _loadTasks() async {
@@ -115,56 +115,75 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _updateTaskMarkers() {
-    setState(() {
-      // Keep 'me' marker
-      final myMarker = _markers.firstWhere(
-        (m) => m.markerId.value == 'me',
-        orElse: () => const Marker(markerId: MarkerId('temp')),
-      );
-      
-      _markers.clear();
-      if (myMarker.markerId.value != 'temp') {
-        _markers.add(myMarker);
-      }
-
-      for (var task in _tasks) {
-        if (task['status'] != 'resolved' && task['emergency']['location']['latitude'] != null) {
-          _markers.add(
-            Marker(
-              markerId: MarkerId('task_${task['id']}'),
-              position: LatLng(
-                task['emergency']['location']['latitude'],
-                task['emergency']['location']['longitude'],
-              ),
-              icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-              infoWindow: InfoWindow(
-                title: 'Emergency #${task['emergency']['id']}',
-                snippet: task['emergency']['description'],
-              ),
+    // Preserve current location marker if present
+    Marker? myMarker;
+    try {
+      myMarker = _markers.firstWhere((m) => m.point == _initialPosition);
+    } catch (_) {}
+    _markers.clear();
+    if (myMarker != null) _markers.add(myMarker);
+    for (var task in _tasks) {
+      if (task['emergency'] != null &&
+          task['emergency']['location'] != null &&
+          task['emergency']['location']['latitude'] != null) {
+        final lat = task['emergency']['location']['latitude'];
+        final lng = task['emergency']['location']['longitude'];
+        _markers.add(
+          Marker(
+            point: LatLng(lat, lng),
+            width: 50,
+            height: 50,
+            child: const Icon(
+              Icons.location_on,
+              color: Colors.red,
+              size: 40,
             ),
-          );
-        }
+          ),
+        );
       }
-    });
+    }
   }
 
-  Future<void> _updateStatus(int taskId, String status) async {
+  Future<void> _acceptTask(int taskId) async {
     try {
-      await _apiService.updateTaskStatus(taskId, status);
+      await _apiService.updateTaskStatus(taskId, 'accepted');
       _loadTasks();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Status updated to $status')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Task accepted')),
+        );
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _declineTask(int taskId) async {
+    try {
+      await _apiService.updateTaskStatus(taskId, 'declined');
+      _loadTasks();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Task declined')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
     }
   }
 
   @override
   void dispose() {
     _channel?.sink.close();
+    _locationSubscription?.cancel();
     super.dispose();
   }
 
@@ -172,26 +191,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Police Dashboard'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadTasks,
-          ),
-        ],
+        title: const Text('Officer Dashboard'),
+        backgroundColor: Colors.blue,
+        foregroundColor: Colors.white,
       ),
       body: Column(
         children: [
           Expanded(
-            flex: 1,
-            child: GoogleMap(
-              mapType: MapType.normal,
-              initialCameraPosition: _initialPosition,
-              markers: _markers,
-              myLocationEnabled: true,
-              onMapCreated: (GoogleMapController controller) {
-                _controller.complete(controller);
-              },
+            flex: 2,
+            child: FlutterMap(
+              mapController: _mapController,
+              options: MapOptions(
+                initialCenter: _initialPosition,
+                initialZoom: 14.0,
+                minZoom: 5.0,
+                maxZoom: 18.0,
+              ),
+              children: [
+                TileLayer(
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  userAgentPackageName: 'com.example.police_companion_app',
+                ),
+                MarkerLayer(markers: _markers),
+              ],
             ),
           ),
           Expanded(
@@ -203,19 +225,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     itemBuilder: (context, index) {
                       final task = _tasks[index];
                       return Card(
-                        margin: const EdgeInsets.all(8.0),
-                        color: task['status'] == 'pending' ? Colors.red[50] : Colors.white,
+                        margin: const EdgeInsets.all(8),
                         child: ListTile(
-                          title: Text('Emergency #${task['emergency']['id']}'),
+                          title: Text('Task #${task['id']}'),
                           subtitle: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(task['emergency']['description'] ?? 'No description'),
-                              Text('Status: ${task['status'].toUpperCase()}',
-                                  style: const TextStyle(fontWeight: FontWeight.bold)),
+                              Text('Victim: ${task['emergency']['victim_name']}'),
+                              Text('Status: ${task['status']}'),
+                              if (task['emergency']['description'] != null)
+                                Text('Details: ${task['emergency']['description']}'),
                             ],
                           ),
-                          trailing: _buildActionButtons(task),
+                          trailing: task['status'] == 'pending'
+                              ? Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(
+                                      icon: const Icon(Icons.check, color: Colors.green),
+                                      onPressed: () => _acceptTask(task['id']),
+                                    ),
+                                    IconButton(
+                                      icon: const Icon(Icons.close, color: Colors.red),
+                                      onPressed: () => _declineTask(task['id']),
+                                    ),
+                                  ],
+                                )
+                              : null,
                         ),
                       );
                     },
@@ -224,40 +260,5 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ],
       ),
     );
-  }
-
-  Widget _buildActionButtons(dynamic task) {
-    if (task['status'] == 'pending') {
-      return Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          IconButton(
-            icon: const Icon(Icons.check, color: Colors.green),
-            onPressed: () => _updateStatus(task['id'], 'accepted'),
-          ),
-          IconButton(
-            icon: const Icon(Icons.close, color: Colors.red),
-            onPressed: () => _updateStatus(task['id'], 'declined'),
-          ),
-        ],
-      );
-    } else if (task['status'] == 'accepted') {
-      return ElevatedButton(
-        onPressed: () => _updateStatus(task['id'], 'en_route'),
-        child: const Text('En Route'),
-      );
-    } else if (task['status'] == 'en_route') {
-      return ElevatedButton(
-        onPressed: () => _updateStatus(task['id'], 'arrived'),
-        child: const Text('Arrived'),
-      );
-    } else if (task['status'] == 'arrived') {
-      return ElevatedButton(
-        onPressed: () => _updateStatus(task['id'], 'resolved'),
-        style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-        child: const Text('Resolve'),
-      );
-    }
-    return const SizedBox.shrink();
   }
 }

@@ -6,13 +6,15 @@ import 'package:sensors_plus/sensors_plus.dart';
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:math';
+import '../config/api_config.dart';  // ✅ IMPORT CONFIG
 
 class CombinedDetectionService {
   static final CombinedDetectionService _instance = CombinedDetectionService._internal();
   factory CombinedDetectionService() => _instance;
   CombinedDetectionService._internal();
 
-  final String API_URL = 'http://192.168.1.13:8000/api/emergency/predict-combined/';
+  // ✅ USE CENTRALIZED CONFIG INSTEAD OF HARDCODED URL
+  String get API_URL => ApiConfig.predictCombinedUrl;
 
   // Recording state
   bool _isRecording = false;
@@ -131,7 +133,7 @@ class CombinedDetectionService {
       print('❌ Error stopping audio: $e');
     }
 
-    print('⏹️ Recording stopped. Analyzing...');
+    print('ℹ️ Recording stopped. Analyzing...');
     onStatusUpdate?.call('🔍 Analyzing threat level...');
 
     // Send to backend for prediction
@@ -179,14 +181,14 @@ class CombinedDetectionService {
         double confidence = (result['combined_confidence'] ?? 0.0).toDouble();
 
         print('');
-        print('═══════════════════════════════════════');
+        print('╔═══════════════════════════════════════╗');
         print('🎯 THREAT DETECTION RESULT');
-        print('═══════════════════════════════════════');
+        print('╠═══════════════════════════════════════╣');
         print('Status: ${isThreat ? "⚠️ THREAT DETECTED" : "✅ SAFE"}');
         print('Confidence: ${(confidence * 100).toStringAsFixed(1)}%');
         print('Movement: ${result['movement_result']['action']} (${(result['movement_result']['confidence'] * 100).toStringAsFixed(1)}%)');
         print('Audio: ${result['audio_result']['is_threat'] ? "THREAT" : "Safe"} (${(result['audio_result']['confidence'] * 100).toStringAsFixed(1)}%)');
-        print('═══════════════════════════════════════');
+        print('╚═══════════════════════════════════════╝');
         print('');
 
         onStatusUpdate?.call(isThreat ? '⚠️ THREAT DETECTED!' : '✅ All Safe');

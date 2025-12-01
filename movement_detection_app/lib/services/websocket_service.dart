@@ -1,38 +1,54 @@
 import 'dart:convert';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import '../config/api_config.dart';
 
 class WebSocketService {
   WebSocketChannel? _channel;
+
   Function(Map<String, dynamic>)? onPoliceLocationUpdate;
   Function(Map<String, dynamic>)? onEmergencyResolved;
 
   void connect(int userId) {
     try {
+      print('🔌 Connecting to WebSocket: ${ApiConfig.websocketUrl}$userId/');
+      
       _channel = WebSocketChannel.connect(
-        Uri.parse('ws://192.168.1.5:8000/ws/user/$userId/'),
+        Uri.parse('${ApiConfig.websocketUrl}$userId/'),
       );
 
       _channel!.stream.listen(
-            (message) {
-          print('RAW MESSAGE: $message');
-          final data = json.decode(message);
-          print('PARSED DATA: $data');
+        (message) {
+          print('📨 WebSocket message received: $message');
+          
+          try {
+            final data = jsonDecode(message);
+            final String type = data['type'] ?? '';
 
-          if (data['type'] == 'location_update' && onPoliceLocationUpdate != null) {
-            print('Calling onPoliceLocationUpdate callback');
-            onPoliceLocationUpdate!(data['data']);
-          } else if (data['type'] == 'emergency_resolved' && onEmergencyResolved != null) {
-            print('Emergency resolved by police');
-            onEmergencyResolved!(data['data']);
+            switch (type) {
+              case 'police_location_update':
+                onPoliceLocationUpdate?.call(data);
+                break;
+              case 'emergency_resolved':
+                onEmergencyResolved?.call(data);
+                break;
+              default:
+                print('⚠️ Unknown WebSocket message type: $type');
+            }
+          } catch (e) {
+            print('❌ Error parsing WebSocket message: $e');
           }
         },
-        onError: (error) => print('WebSocket error: $error'),
-        onDone: () => print('WebSocket closed'),
+        onError: (error) {
+          print('❌ WebSocket error: $error');
+        },
+        onDone: () {
+          print('🔌 WebSocket connection closed');
+        },
       );
 
-      print('User WebSocket connected for user $userId');
+      print('✅ WebSocket connected successfully');
     } catch (e) {
-      print('WebSocket connection failed: $e');
+      print('❌ Failed to connect to WebSocket: $e');
     }
   }
 
@@ -41,10 +57,15 @@ class WebSocketService {
     required int userId,
     required String userName,
     required String location,
-    required Map<String, double> coordinates,
+    required Map<String, dynamic> coordinates,
   }) {
-    if (_channel != null) {
-      final message = json.encode({
+    if (_channel == null) {
+      print('⚠️ WebSocket not connected. Cannot send emergency trigger.');
+      return;
+    }
+
+    try {
+      final message = jsonEncode({
         'type': 'emergency_trigger',
         'alert_id': alertId,
         'user_id': userId,
@@ -55,24 +76,39 @@ class WebSocketService {
       });
 
       _channel!.sink.add(message);
-      print('Emergency sent via WebSocket');
+      print('📤 Sent emergency trigger via WebSocket');
+    } catch (e) {
+      print('❌ Error sending emergency trigger: $e');
     }
   }
 
   void sendNoThreat({required int userId}) {
-    if (_channel != null) {
-      final message = json.encode({
+    if (_channel == null) {
+      print('⚠️ WebSocket not connected. Cannot send no-threat message.');
+      return;
+    }
+
+    try {
+      final message = jsonEncode({
         'type': 'no_threat',
         'user_id': userId,
         'timestamp': DateTime.now().toIso8601String(),
       });
 
       _channel!.sink.add(message);
-      print('No threat message sent via WebSocket');
+      print('📤 Sent no-threat message via WebSocket');
+    } catch (e) {
+      print('❌ Error sending no-threat message: $e');
     }
   }
 
   void disconnect() {
-    _channel?.sink.close();
+    try {
+      _channel?.sink.close();
+      _channel = null;
+      print('🔌 WebSocket disconnected');
+    } catch (e) {
+      print('❌ Error disconnecting WebSocket: $e');
+    }
   }
 }

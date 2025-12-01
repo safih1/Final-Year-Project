@@ -349,16 +349,28 @@ def predict_audio(request):
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+
 @api_view(['POST'])
 @permission_classes([permissions.AllowAny])
 def predict_combined(request):
     """
     Predict threat from both movement and audio data
     Returns combined threat assessment
+    
+    Logic:
+    - Non-threat actions: jogging, jumping, falling, dancing, walking, running
+    - Any other action = THREAT
+    - Audio threat OR Movement threat = OVERALL THREAT
     """
     try:
-        # Get movement data
-        movement_data = request.data.get('movement_data')
+        import json
+        
+        # Get movement data (JSON string)
+        movement_data_str = request.data.get('movement_data')
+        if movement_data_str:
+            movement_data = json.loads(movement_data_str) if isinstance(movement_data_str, str) else movement_data_str
+        else:
+            movement_data = None
         
         # Get audio file
         audio_file = request.FILES.get('audio_file')
@@ -368,11 +380,32 @@ def predict_combined(request):
         
         predictor = MLPredictor.get_instance()
         
-        # Predict movement
+        # ============================================
+        # 1. PREDICT MOVEMENT
+        # ============================================
         movement_result = predictor.predict(movement_data)
         
-        # Predict audio if file provided
-        audio_result = {'is_threat': False, 'confidence': 0.0}
+        # Define non-threat actions
+        NON_THREAT_ACTIONS = [
+            'jogging', 'jumping', 'falling', 
+            'dancing', 'walking', 'running'
+        ]
+        
+        # Check if action is a threat (case-insensitive)
+        detected_action = movement_result['action'].lower()
+        movement_is_threat = detected_action not in NON_THREAT_ACTIONS
+        
+        # Update movement result with correct threat status
+        movement_result['is_threat'] = movement_is_threat
+        movement_result['status'] = 'THREAT' if movement_is_threat else 'SAFE'
+        
+        logger.info(f"Movement detected: {detected_action} - Threat: {movement_is_threat}")
+        
+        # ============================================
+        # 2. PREDICT AUDIO (if provided)
+        # ============================================
+        audio_result = {'is_threat': False, 'confidence': 0.0, 'status': 'NO_AUDIO'}
+        
         if audio_file:
             import tempfile
             import os
@@ -384,30 +417,43 @@ def predict_combined(request):
                 
             try:
                 audio_result = predictor.predict_audio(tmp_path)
+                logger.info(f"Audio prediction: Threat={audio_result['is_threat']}, Confidence={audio_result.get('confidence', 0)}")
             finally:
                 if os.path.exists(tmp_path):
                     os.remove(tmp_path)
         
-        # Combined threat assessment
+        # ============================================
+        # 3. COMBINED THREAT ASSESSMENT
+        # ============================================
+        # Threat if EITHER movement OR audio detects threat
         is_threat = movement_result['is_threat'] or audio_result['is_threat']
         
-        # Calculate combined confidence (average if both detect threat, or max)
+        # Calculate combined confidence
         if movement_result['is_threat'] and audio_result['is_threat']:
+            # Both detect threat - average confidence
             combined_confidence = (movement_result['confidence'] + audio_result.get('confidence', 0)) / 2
         else:
+            # Only one detects threat - use maximum confidence
             combined_confidence = max(movement_result['confidence'], audio_result.get('confidence', 0))
+        
+        logger.info(f"COMBINED RESULT - Threat: {is_threat}, Confidence: {combined_confidence}")
         
         return Response({
             'is_threat': is_threat,
             'combined_confidence': combined_confidence,
             'movement_result': movement_result,
             'audio_result': audio_result,
-            'status': 'THREAT DETECTED' if is_threat else 'SAFE'
+            'status': 'THREAT DETECTED' if is_threat else 'SAFE',
+            'detected_action': detected_action,
+            'threat_reason': 'movement' if movement_result['is_threat'] else ('audio' if audio_result['is_threat'] else 'none')
         })
         
     except Exception as e:
         logger.error(f"Combined prediction error: {e}")
+        import traceback
+        traceback.print_exc()
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 
 @api_view(['GET'])

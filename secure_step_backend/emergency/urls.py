@@ -10,8 +10,11 @@ urlpatterns = [
     # Emergency Alerts
     path('trigger/', views.trigger_emergency, name='trigger_emergency'),
     path('alerts/', views.EmergencyAlertListView.as_view(), name='emergency_alerts'),
+    
+    # ⭐ PREDICTION ENDPOINTS - ALL THREE
     path('predict/', views.predict_movement, name='predict_movement'),
     path('predict-audio/', views.predict_audio, name='predict_audio'),
+    path('predict-combined/', views.predict_combined, name='predict_combined'),  # ✅ ADDED THIS
     
     # Emergency Settings
     path('settings/', views.EmergencySettingsView.as_view(), name='emergency_settings'),

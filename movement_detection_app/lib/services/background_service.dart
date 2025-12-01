@@ -3,7 +3,10 @@ import 'dart:ui';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:speech_to_text/speech_to_text.dart';
+import 'package:geolocator/geolocator.dart';
 import 'combined_detection_service.dart';
+import 'api_service.dart';
+
 class BackgroundService {
   static final BackgroundService _instance = BackgroundService._internal();
   factory BackgroundService() => _instance;
@@ -13,9 +16,9 @@ class BackgroundService {
     final service = FlutterBackgroundService();
 
     const AndroidNotificationChannel channel = AndroidNotificationChannel(
-      'my_foreground', // id
-      'MY FOREGROUND SERVICE', // title
-      description: 'This channel is used for important notifications.', // description
+      'my_foreground',
+      'MY FOREGROUND SERVICE',
+      description: 'This channel is used for important notifications.',
       importance: Importance.low,
     );
 
@@ -30,7 +33,7 @@ class BackgroundService {
     await service.configure(
       androidConfiguration: AndroidConfiguration(
         onStart: onStart,
-        autoStart: false, // User should enable it manually
+        autoStart: false,
         isForegroundMode: true,
         notificationChannelId: 'my_foreground',
         initialNotificationTitle: 'Secure Step Guardian',
@@ -59,34 +62,25 @@ class BackgroundService {
   }
 }
 
-
 @pragma('vm:entry-point')
 void onStart(ServiceInstance service) async {
   DartPluginRegistrant.ensureInitialized();
 
   final SpeechToText speech = SpeechToText();
   bool isListening = false;
-
-  // Use combined detection service
   final detectionService = CombinedDetectionService();
+  final apiService = ApiService();
 
-  detectionService.onPredictionResult = (isThreat, confidence, fullResult) {
+  // ✅ AUTOMATIC EMERGENCY TRIGGER ON THREAT DETECTION
+  detectionService.onPredictionResult = (isThreat, confidence, fullResult) async {
     if (isThreat) {
-      service.invoke(
-        'threat_detected',
-        {
-          'is_threat': true,
-          'confidence': confidence,
-          'movement_action': fullResult['movement_result']['action'],
-          'audio_threat': fullResult['audio_result']['is_threat'],
-        },
-      );
-
+      print('⚠️ THREAT DETECTED - TRIGGERING AUTOMATIC EMERGENCY');
+      
       // Show critical notification
       FlutterLocalNotificationsPlugin().show(
         889,
-        '⚠️ THREAT DETECTED',
-        'Confidence: ${(confidence * 100).toStringAsFixed(1)}% - Emergency services alerted',
+        '🚨 THREAT DETECTED',
+        'Confidence: ${(confidence * 100).toStringAsFixed(1)}% - Alerting emergency services!',
         const NotificationDetails(
           android: AndroidNotificationDetails(
             'my_foreground',
@@ -98,6 +92,66 @@ void onStart(ServiceInstance service) async {
           ),
         ),
       );
+
+      // ✅ AUTOMATICALLY TRIGGER EMERGENCY WITH LOCATION
+      try {
+        // Get current location
+        bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+        if (!serviceEnabled) {
+          print('⚠️ Location services disabled - using default location');
+        }
+
+        LocationPermission permission = await Geolocator.checkPermission();
+        if (permission == LocationPermission.denied) {
+          permission = await Geolocator.requestPermission();
+        }
+
+        Position? position;
+        try {
+          position = await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.high,
+          ).timeout(const Duration(seconds: 5));
+        } catch (e) {
+          print('⚠️ Could not get location: $e');
+        }
+
+        final double lat = position?.latitude ?? 34.1688;  // Default: Abbottabad
+        final double lng = position?.longitude ?? 73.2215;
+        final String locationStr = "Lat: ${lat.toStringAsFixed(5)}, Lng: ${lng.toStringAsFixed(5)}";
+
+        // Trigger emergency via API
+        final result = await apiService.triggerEmergency(
+          alertType: 'automatic',
+          address: locationStr,
+          latitude: lat,
+          longitude: lng,
+          description: 'Automatic threat detection: ${fullResult['detected_action'] ?? 'Unknown'} '
+                      '(Confidence: ${(confidence * 100).toStringAsFixed(1)}%)',
+        );
+
+        if (result['alert'] != null) {
+          print('✅ Emergency alert sent successfully: Alert ID ${result['alert']['id']}');
+          
+          // Send notification of success
+          FlutterLocalNotificationsPlugin().show(
+            890,
+            '✅ Emergency Alert Sent',
+            'Police and emergency contacts have been notified. Help is on the way!',
+            const NotificationDetails(
+              android: AndroidNotificationDetails(
+                'my_foreground',
+                'MY FOREGROUND SERVICE',
+                importance: Importance.high,
+                priority: Priority.high,
+              ),
+            ),
+          );
+        } else {
+          print('❌ Failed to send emergency alert: ${result['error']}');
+        }
+      } catch (e) {
+        print('❌ Error triggering automatic emergency: $e');
+      }
     }
   };
 
@@ -159,7 +213,7 @@ void _startListeningLoop(SpeechToText speech, ServiceInstance service, CombinedD
             ),
           );
 
-          // Start combined detection
+          // Start combined detection (will auto-trigger emergency if threat detected)
           detectionService.startDetection();
         }
       },

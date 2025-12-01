@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'screens/login_screen.dart';
-import 'services/background_service.dart';
+import 'services/location_background_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // Initialize background service (but don't start it yet)
-  // It will be started after login
-  
+
+  // VERY IMPORTANT: initialize background service
+  await LocationBackgroundService.initialize();
+
   runApp(const PoliceCompanionApp());
 }
 

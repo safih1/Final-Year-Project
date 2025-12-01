@@ -15,16 +15,15 @@ class BackgroundService {
     final service = FlutterBackgroundService();
 
     const AndroidNotificationChannel channel = AndroidNotificationChannel(
-      'my_foreground', // id
-      'MY FOREGROUND SERVICE', // title
-      description: 'This channel is used for important notifications.', // description
-      importance: Importance.low,
+      'my_foreground',
+      'MY FOREGROUND SERVICE',
+      description: 'This channel is used for background monitoring.',
+      importance: Importance.high,
     );
 
-    final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-        FlutterLocalNotificationsPlugin();
+    final plugin = FlutterLocalNotificationsPlugin();
 
-    await flutterLocalNotificationsPlugin
+    await plugin
         .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>()
         ?.createNotificationChannel(channel);
@@ -32,12 +31,16 @@ class BackgroundService {
     await service.configure(
       androidConfiguration: AndroidConfiguration(
         onStart: onStart,
-        autoStart: false, // User should enable it manually
+        autoStart: false,
         isForegroundMode: true,
         notificationChannelId: 'my_foreground',
         initialNotificationTitle: 'Secure Step Guardian',
-        initialNotificationContent: 'Listening for "Help" trigger...',
+        initialNotificationContent: 'Voice detection running...',
         foregroundServiceNotificationId: 888,
+        notificationIcon: 'ic_stat_notify', // MUST MATCH drawable!!
+        foregroundServiceTypes: [
+          AndroidForegroundType.microphone,
+        ],
       ),
       iosConfiguration: IosConfiguration(
         autoStart: false,
@@ -49,12 +52,11 @@ class BackgroundService {
 
   Future<void> startService() async {
     final service = FlutterBackgroundService();
-    var isRunning = await service.isRunning();
-    if (!isRunning) {
-      service.startService();
+    if (!(await service.isRunning())) {
+      await service.startService();
     }
   }
-  
+
   Future<void> stopService() async {
     final service = FlutterBackgroundService();
     service.invoke("stopService");
@@ -65,53 +67,37 @@ class BackgroundService {
 void onStart(ServiceInstance service) async {
   DartPluginRegistrant.ensureInitialized();
 
-  final SpeechToText speech = SpeechToText();
-  bool isListening = false;
-  
-  // Initialize Services
+  final speech = SpeechToText();
   final movementService = MovementService();
   final audioService = AudioService();
-  
+
+  // Threat detection callback
   movementService.onPredictionResult = (action, confidence, isThreat) {
-    if (isThreat) {
-      service.invoke(
-        'threat_detected',
-        {
-          'action': action,
-          'confidence': confidence,
-        },
-      );
-      
-      // Show notification
-      FlutterLocalNotificationsPlugin().show(
-        889,
-        'THREAT DETECTED',
-        'Action: $action (Confidence: ${(confidence * 100).toStringAsFixed(1)}%)',
-        const NotificationDetails(
-          android: AndroidNotificationDetails(
-            'my_foreground',
-            'MY FOREGROUND SERVICE',
-            importance: Importance.high,
-            priority: Priority.high,
-          ),
+    if (!isThreat) return;
+
+    FlutterLocalNotificationsPlugin().show(
+      889,
+      'Threat Detected!',
+      'Action: $action  |  Confidence: ${(confidence * 100).toStringAsFixed(1)}%',
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'my_foreground',
+          'MY FOREGROUND SERVICE',
+          importance: Importance.max,
+          priority: Priority.high,
+          icon: 'ic_stat_notify',
         ),
-      );
-    }
+      ),
+    );
   };
 
-  // Initialize Speech
   bool available = await speech.initialize(
     onStatus: (status) {
-      print('Speech status: $status');
       if (status == 'done' || status == 'notListening') {
-        isListening = false;
-        // Restart listening loop if service is running
         _startListeningLoop(speech, service, movementService, audioService);
       }
     },
     onError: (error) {
-      print('Speech error: $error');
-      isListening = false;
       _startListeningLoop(speech, service, movementService, audioService);
     },
   );
@@ -120,7 +106,7 @@ void onStart(ServiceInstance service) async {
     _startListeningLoop(speech, service, movementService, audioService);
   }
 
-  service.on('stopService').listen((event) {
+  service.on("stopService").listen((event) {
     service.stopSelf();
   });
 }
@@ -130,14 +116,19 @@ bool onIosBackground(ServiceInstance service) {
   return true;
 }
 
-void _startListeningLoop(SpeechToText speech, ServiceInstance service, MovementService movementService, AudioService audioService) async {
+void _startListeningLoop(
+  SpeechToText speech,
+  ServiceInstance service,
+  MovementService movementService,
+  AudioService audioService,
+) async {
   if (speech.isListening) return;
 
   try {
     await speech.listen(
       onResult: (result) {
-        if (result.recognizedWords.toLowerCase().contains('help')) {
-          print('Wake word "Help" detected!');
+        final text = result.recognizedWords.toLowerCase();
+        if (text.contains('help')) {
           movementService.startRecording();
           audioService.startRecording();
         }
@@ -147,8 +138,6 @@ void _startListeningLoop(SpeechToText speech, ServiceInstance service, MovementS
       listenMode: ListenMode.dictation,
     );
   } catch (e) {
-    print('Listen error: $e');
-    // Wait a bit and retry
     await Future.delayed(const Duration(seconds: 2));
     _startListeningLoop(speech, service, movementService, audioService);
   }

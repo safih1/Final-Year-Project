@@ -8,12 +8,7 @@ class EmergencyContact(models.Model):
     name = models.CharField(max_length=100)
     phone_number = models.CharField(
         max_length=20,
-        validators=[
-            RegexValidator(
-                regex=r'^[\+]?[1-9][\d\-\(\)\s]{9,20}$',
-                message="Phone number must be valid format"
-            )
-        ]
+        
     )
     relationship = models.CharField(max_length=50, blank=True, default='Contact')
     is_primary = models.BooleanField(default=False)

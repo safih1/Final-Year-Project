@@ -99,6 +99,7 @@ class _EmergencyContactsScreenState extends State<EmergencyContactsScreen> {
         initialPhone: contact['phone_number'],
         initialRelationship: contact['relationship'],
         isEdit: true,
+        
       ),
     );
 
