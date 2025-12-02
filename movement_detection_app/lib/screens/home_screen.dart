@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:secure_step/services/background_service.dart';
+import 'package:secure_step/services/combined_detection_service.dart';
 import 'dart:async';
 import '../widgets/app_drawer.dart';
 import '../services/websocket_service.dart';
@@ -34,9 +36,13 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<String, double>? _policeLocation;
   int? _policeETA;
   bool _policeResponding = false;
+  bool _isGuardianActive = false; // Track guardian mode status
+
 
   Timer? _locationUpdateTimer;
   DateTime? _lastUpdateTime;
+  StreamSubscription? _serviceListener; // Listen to background service events
+  CombinedDetectionService detectionService = CombinedDetectionService();
 
   @override
   void initState() {
@@ -48,6 +54,8 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     _startUpdateMonitor();
+    _listenToBackgroundService(); // ✅ NEW: Listen for threat detection events
+
   }
 
   @override
@@ -57,6 +65,245 @@ class _HomeScreenState extends State<HomeScreen> {
     _nameController.dispose();
     _phoneController.dispose();
     super.dispose();
+  }
+
+
+  void _listenToBackgroundService() {
+    final service = FlutterBackgroundService();
+    
+    _serviceListener = service.on('threat_detected').listen((event) {
+      if (event != null && mounted) {
+        print('📱 Received threat detection event: $event');
+        _showThreatDetectionDialog(event);
+      }
+    });
+  }
+
+
+  
+  void _showThreatDetectionDialog(Map<String, dynamic>? data) {
+    if (data == null) return;
+
+    final double confidence = (data['confidence'] ?? 0.0).toDouble();
+    final String action = data['detected_action'] ?? 'Unknown';
+    final double audioConf = (data['audio_confidence'] ?? 0.0).toDouble();
+    final double movementConf = (data['movement_confidence'] ?? 0.0).toDouble();
+
+    showDialog(
+      context: context,
+      barrierDismissible: false, // Prevent dismissing by tapping outside
+      builder: (BuildContext context) {
+        return WillPopScope(
+          onWillPop: () async => false, // Prevent back button dismissal
+          child: AlertDialog(
+            backgroundColor: Colors.red.shade900,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+              side: BorderSide(color: Colors.red.shade700, width: 3),
+            ),
+            title: Row(
+              children: [
+                Icon(Icons.warning_amber_rounded, color: Colors.white, size: 40),
+                const SizedBox(width: 15),
+                Expanded(
+                  child: Text(
+                    '🚨 THREAT DETECTED',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: EdgeInsets.all(15),
+                  decoration: BoxDecoration(
+                    color: Colors.black26,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildInfoRow('Overall Confidence:', '${(confidence * 100).toStringAsFixed(1)}%', Colors.red.shade300),
+                      SizedBox(height: 8),
+                      _buildInfoRow('Detected Action:', action.toUpperCase(), Colors.orange.shade300),
+                      SizedBox(height: 8),
+                      _buildInfoRow('Audio Analysis:', '${(audioConf * 100).toStringAsFixed(1)}%', Colors.yellow.shade300),
+                      SizedBox(height: 8),
+                      _buildInfoRow('Movement Analysis:', '${(movementConf * 100).toStringAsFixed(1)}%', Colors.yellow.shade300),
+                    ],
+                  ),
+                ),
+                SizedBox(height: 20),
+                Container(
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.shade900,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.timer, color: Colors.white, size: 20),
+                      SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Emergency will trigger automatically in 10 seconds',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              // False Alarm Button
+              TextButton.icon(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('False alarm reported. No emergency triggered.'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                },
+                icon: Icon(Icons.cancel, color: Colors.white),
+                label: Text(
+                  'FALSE ALARM',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                style: TextButton.styleFrom(
+                  backgroundColor: Colors.green.shade700,
+                  padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                ),
+              ),
+              SizedBox(width: 10),
+              // Confirm Emergency Button
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  _confirmThreatAndTriggerEmergency();
+                },
+                icon: Icon(Icons.emergency, color: Colors.white),
+                label: Text(
+                  'CONFIRM & ALERT',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red.shade700,
+                  padding: EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    // ✅ Auto-trigger after 10 seconds if user doesn't respond
+    Future.delayed(Duration(seconds: 10), () {
+      if (mounted && Navigator.canPop(context)) {
+        Navigator.of(context).pop();
+        _confirmThreatAndTriggerEmergency();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('⏰ Auto-triggering emergency - No response received'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    });
+  }
+
+  // ✅ NEW: Helper widget for info rows
+  Widget _buildInfoRow(String label, String value, Color valueColor) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.white70,
+            fontSize: 14,
+          ),
+        ),
+        Text(
+          value,
+          style: TextStyle(
+            color: valueColor,
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ],
+    );
+  }
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+  Future<void> _startGuardianMode() async {
+    try {
+      await BackgroundService().initialize();
+      await BackgroundService().startService();
+      
+      setState(() {
+        _isGuardianActive = true;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.shield, color: Colors.white),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text('🛡️ Guardian Mode Activated\nSay "Help" to trigger detection'),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 5),
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+    Future<void> _stopGuardianMode() async {
+    await BackgroundService().stopService();
+    setState(() {
+      _isGuardianActive = false;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('🛑 Guardian Mode Deactivated'),
+        backgroundColor: Colors.orange,
+      ),
+    );
   }
 
   void _startUpdateMonitor() {
@@ -226,7 +473,11 @@ class _HomeScreenState extends State<HomeScreen> {
       },
     );
   }
-
+  // ✅ NEW: Trigger emergency after threat confirmation
+  void _confirmThreatAndTriggerEmergency() async {
+    _triggerEmergencyLogic();
+  }
+  
   void _triggerEmergencyLogic() async {
     if (widget.loggedInUser == null || widget.loggedInUser!['email'] == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -247,7 +498,7 @@ class _HomeScreenState extends State<HomeScreen> {
           "Lat: ${currentLat.toStringAsFixed(5)}, Lng: ${currentLng.toStringAsFixed(5)}";
 
       final result = await _apiService.triggerEmergency(
-        alertType: 'manual',
+        alertType: 'automstic',
         address: currentLocation,
         latitude: currentLat,
         longitude: currentLng,
@@ -296,53 +547,6 @@ class _HomeScreenState extends State<HomeScreen> {
   void _callPolice() {
     _confirmAndTriggerEmergency();
   }
-
-  Future<void> _startGuardianMode() async {
-  try {
-    // Request permissions
-    final micStatus = await Permission.microphone.request();
-    final locationStatus = await Permission.location.request();
-    
-    if (!micStatus.isGranted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Microphone permission is required for voice activation'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
-    if (!locationStatus.isGranted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Location permission is required for emergency alerts'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
-    // Initialize and start service
-    await BackgroundService().initialize();
-    await BackgroundService().startService();
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('🛡️ Guardian Mode Activated - Say "Help" to trigger'),
-        backgroundColor: Colors.green,
-        duration: Duration(seconds: 5),
-      ),
-    );
-  } catch (e) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Error starting Guardian Mode: $e'),
-        backgroundColor: Colors.red,
-      ),
-    );
-  }
-}
 
   @override
   Widget build(BuildContext context) {
@@ -399,6 +603,45 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (_isGuardianActive)
+                Card(
+                  color: Colors.green.shade900,
+                  margin: const EdgeInsets.only(bottom: 16.0),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Row(
+                      children: [
+                        Icon(Icons.shield, color: Colors.white, size: 32),
+                        const SizedBox(width: 15),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '🛡️ GUARDIAN MODE ACTIVE',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              SizedBox(height: 5),
+                              Text(
+                                'Listening for "Help" trigger...',
+                                style: TextStyle(color: Colors.white70, fontSize: 14),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: Icon(Icons.stop_circle, color: Colors.white, size: 32),
+                          onPressed: _stopGuardianMode,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
               if (_policeResponding)
                 Card(
                   margin: const EdgeInsets.only(bottom: 16.0),

@@ -193,7 +193,9 @@ class CombinedDetectionService {
 
         onStatusUpdate?.call(isThreat ? '⚠️ THREAT DETECTED!' : '✅ All Safe');
         onPredictionResult?.call(isThreat, confidence, result);
-
+        if (isThreat) {
+          onStatusUpdate?.call("🚨 EMERGENCY TRIGGERED");
+          }
         // Clean up audio file
         if (audioPath != null && File(audioPath).existsSync()) {
           File(audioPath).deleteSync();

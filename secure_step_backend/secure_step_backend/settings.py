@@ -31,7 +31,7 @@ DEBUG = config('DEBUG', default=True, cast=bool)
 ALLOWED_HOSTS = [
     'localhost',
     '127.0.0.1',
-    '192.168.1.8',  # Your laptop's IP
+    '172.20.10.6',  # Your laptop's IP
 ]
 
 

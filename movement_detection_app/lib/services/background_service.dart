@@ -86,7 +86,7 @@ void onStart(ServiceInstance service) async {
 
   print('🎤 Background service started - Initializing speech recognition...');
 
-  // Initialize notifications
+  //////////////////////////// Initialize notifications
   final FlutterLocalNotificationsPlugin notifications = FlutterLocalNotificationsPlugin();
 
   // Automatic threat detection callback
@@ -107,10 +107,36 @@ void onStart(ServiceInstance service) async {
             priority: Priority.high,
             playSound: true,
             enableVibration: true,
+            fullScreenIntent: true,
+            
           ),
         ),
       );
+            service.invoke('threat_detected', {
+        'is_threat': isThreat,
+        'confidence': confidence,
+        'detected_action': fullResult['detected_action'] ?? 'Unknown',
+        'audio_confidence': fullResult['audio_confidence'] ?? 0.0,
+        'movement_confidence': fullResult['movement_confidence'] ?? 0.0,
+        'timestamp': DateTime.now().toIso8601String(),
+      });
 
+    } else {
+      print('✅ No threat detected - All clear');
+      
+      await notifications.show(
+        890,
+        '✅ All Clear',
+        'No threat detected. Confidence: ${(confidence * 100).toStringAsFixed(1)}%',
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            'my_foreground',
+            'Guardian Service',
+            importance: Importance.low,
+            priority: Priority.low,
+          ),
+        ),
+      );
       // Get location and trigger emergency
       try {
         Position? position;
