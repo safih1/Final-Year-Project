@@ -1,0 +1,10 @@
+^C:\USERS\PMLS\ANDROIDSTUDIOPROJECTS\POLICE_COMPANION_APP\BUILD\WINDOWS\X64\CMAKEFILES\EC924F4C98A50D644830F2FED42C58AD\GENERATE.STAMP.RULE
+setlocal
+"C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -SC:/Users/PMLS/AndroidStudioProjects/police_companion_app/windows -BC:/Users/PMLS/AndroidStudioProjects/police_companion_app/build/windows/x64 --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file C:/Users/PMLS/AndroidStudioProjects/police_companion_app/build/windows/x64/police_companion_app.sln
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

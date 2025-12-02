@@ -1,0 +1,20 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="16.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\PMLS\AndroidStudioProjects\police_companion_app\build\windows\x64\CMakeFiles\420b122db7abf96d1ea8ace2a72b2a8a\flutter_windows.dll.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\Users\PMLS\AndroidStudioProjects\police_companion_app\build\windows\x64\CMakeFiles\d9557eab196ca54f5cf988e4cd24572c\flutter_assemble.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\Users\PMLS\AndroidStudioProjects\police_companion_app\windows\flutter\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="C:\Users\PMLS\AndroidStudioProjects\police_companion_app\build\windows\x64\flutter\CMakeFiles\flutter_assemble" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{32FD06BC-D8AF-3F34-94F1-14D68BBD42ED}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

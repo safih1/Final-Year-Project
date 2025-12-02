@@ -21,7 +21,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
 
   List<dynamic> _tasks = [];
-  List<Marker> _markers = [];
+  final List<Marker> _markers = [];
   LatLng _initialPosition = const LatLng(34.1688, 73.2215);
 
   WebSocketChannel? _channel;

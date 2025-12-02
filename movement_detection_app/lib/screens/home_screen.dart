@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:secure_step/services/background_service.dart';
 import 'dart:async';
 import '../widgets/app_drawer.dart';
 import '../services/websocket_service.dart';
@@ -295,6 +297,53 @@ class _HomeScreenState extends State<HomeScreen> {
     _confirmAndTriggerEmergency();
   }
 
+  Future<void> _startGuardianMode() async {
+  try {
+    // Request permissions
+    final micStatus = await Permission.microphone.request();
+    final locationStatus = await Permission.location.request();
+    
+    if (!micStatus.isGranted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Microphone permission is required for voice activation'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    if (!locationStatus.isGranted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Location permission is required for emergency alerts'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    // Initialize and start service
+    await BackgroundService().initialize();
+    await BackgroundService().startService();
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('🛡️ Guardian Mode Activated - Say "Help" to trigger'),
+        backgroundColor: Colors.green,
+        duration: Duration(seconds: 5),
+      ),
+    );
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Error starting Guardian Mode: $e'),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+}
+
   @override
   Widget build(BuildContext context) {
     final String userName = widget.loggedInUser?['full_name'] ??
@@ -578,6 +627,18 @@ class _HomeScreenState extends State<HomeScreen> {
                           textStyle: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
                         ),
                       ),
+                      const SizedBox(height: 15),
+ElevatedButton.icon(
+  onPressed: _startGuardianMode,
+  icon: const Icon(Icons.shield),
+  label: const Text('Activate Guardian Mode'),
+  style: ElevatedButton.styleFrom(
+    backgroundColor: Colors.green,
+    foregroundColor: Colors.white,
+    minimumSize: const Size(double.infinity, 60),
+    textStyle: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+  ),
+),
                     ],
                   ),
                 ),

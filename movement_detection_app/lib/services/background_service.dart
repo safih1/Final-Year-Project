@@ -4,6 +4,7 @@ import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'combined_detection_service.dart';
 import 'api_service.dart';
 
@@ -17,26 +18,26 @@ class BackgroundService {
 
     const AndroidNotificationChannel channel = AndroidNotificationChannel(
       'my_foreground',
-      'MY FOREGROUND SERVICE',
-      description: 'This channel is used for important notifications.',
+      'Guardian Service',
+      description: 'Listening for emergency triggers',
       importance: Importance.low,
     );
 
     final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
         FlutterLocalNotificationsPlugin();
 
-    await flutterLocalNotificationsPlugin
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(channel);
-
+    // ✅ FIXED: Proper syntax for accessing platform-specific implementation
+await flutterLocalNotificationsPlugin
+    .resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>()
+    ?.createNotificationChannel(channel);
     await service.configure(
       androidConfiguration: AndroidConfiguration(
         onStart: onStart,
         autoStart: false,
         isForegroundMode: true,
         notificationChannelId: 'my_foreground',
-        initialNotificationTitle: 'Secure Step Guardian',
+        initialNotificationTitle: 'SecureStep Guardian',
         initialNotificationContent: 'Listening for "Help" trigger...',
         foregroundServiceNotificationId: 888,
       ),
@@ -49,6 +50,18 @@ class BackgroundService {
   }
 
   Future<void> startService() async {
+    // Request permissions first
+    final micPermission = await Permission.microphone.request();
+    final locationPermission = await Permission.location.request();
+    
+    if (!micPermission.isGranted) {
+      throw Exception('Microphone permission denied');
+    }
+    
+    if (!locationPermission.isGranted) {
+      throw Exception('Location permission denied');
+    }
+
     final service = FlutterBackgroundService();
     var isRunning = await service.isRunning();
     if (!isRunning) {
@@ -71,20 +84,25 @@ void onStart(ServiceInstance service) async {
   final detectionService = CombinedDetectionService();
   final apiService = ApiService();
 
-  // ✅ AUTOMATIC EMERGENCY TRIGGER ON THREAT DETECTION
+  print('🎤 Background service started - Initializing speech recognition...');
+
+  // Initialize notifications
+  final FlutterLocalNotificationsPlugin notifications = FlutterLocalNotificationsPlugin();
+
+  // Automatic threat detection callback
   detectionService.onPredictionResult = (isThreat, confidence, fullResult) async {
     if (isThreat) {
       print('⚠️ THREAT DETECTED - TRIGGERING AUTOMATIC EMERGENCY');
       
       // Show critical notification
-      FlutterLocalNotificationsPlugin().show(
+      await notifications.show(
         889,
         '🚨 THREAT DETECTED',
         'Confidence: ${(confidence * 100).toStringAsFixed(1)}% - Alerting emergency services!',
         const NotificationDetails(
           android: AndroidNotificationDetails(
             'my_foreground',
-            'MY FOREGROUND SERVICE',
+            'Guardian Service',
             importance: Importance.max,
             priority: Priority.high,
             playSound: true,
@@ -93,19 +111,8 @@ void onStart(ServiceInstance service) async {
         ),
       );
 
-      // ✅ AUTOMATICALLY TRIGGER EMERGENCY WITH LOCATION
+      // Get location and trigger emergency
       try {
-        // Get current location
-        bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-        if (!serviceEnabled) {
-          print('⚠️ Location services disabled - using default location');
-        }
-
-        LocationPermission permission = await Geolocator.checkPermission();
-        if (permission == LocationPermission.denied) {
-          permission = await Geolocator.requestPermission();
-        }
-
         Position? position;
         try {
           position = await Geolocator.getCurrentPosition(
@@ -115,11 +122,10 @@ void onStart(ServiceInstance service) async {
           print('⚠️ Could not get location: $e');
         }
 
-        final double lat = position?.latitude ?? 34.1688;  // Default: Abbottabad
+        final double lat = position?.latitude ?? 34.1688;
         final double lng = position?.longitude ?? 73.2215;
         final String locationStr = "Lat: ${lat.toStringAsFixed(5)}, Lng: ${lng.toStringAsFixed(5)}";
 
-        // Trigger emergency via API
         final result = await apiService.triggerEmergency(
           alertType: 'automatic',
           address: locationStr,
@@ -130,52 +136,73 @@ void onStart(ServiceInstance service) async {
         );
 
         if (result['alert'] != null) {
-          print('✅ Emergency alert sent successfully: Alert ID ${result['alert']['id']}');
+          print('✅ Emergency alert sent successfully');
           
-          // Send notification of success
-          FlutterLocalNotificationsPlugin().show(
+          await notifications.show(
             890,
             '✅ Emergency Alert Sent',
-            'Police and emergency contacts have been notified. Help is on the way!',
+            'Police and emergency contacts notified!',
             const NotificationDetails(
               android: AndroidNotificationDetails(
                 'my_foreground',
-                'MY FOREGROUND SERVICE',
+                'Guardian Service',
                 importance: Importance.high,
                 priority: Priority.high,
               ),
             ),
           );
-        } else {
-          print('❌ Failed to send emergency alert: ${result['error']}');
         }
       } catch (e) {
-        print('❌ Error triggering automatic emergency: $e');
+        print('❌ Error triggering emergency: $e');
       }
     }
   };
 
-  // Initialize Speech
+  // Initialize Speech Recognition
   bool available = await speech.initialize(
     onStatus: (status) {
-      print('Speech status: $status');
+      print('🎤 Speech status: $status');
       if (status == 'done' || status == 'notListening') {
         isListening = false;
-        _startListeningLoop(speech, service, detectionService);
+        // Restart listening after a short delay
+        Future.delayed(const Duration(seconds: 1), () {
+          _startListeningLoop(speech, service, detectionService, notifications);
+        });
       }
     },
     onError: (error) {
-      print('Speech error: $error');
+      print('❌ Speech error: $error');
       isListening = false;
-      _startListeningLoop(speech, service, detectionService);
+      // Restart listening after error
+      Future.delayed(const Duration(seconds: 2), () {
+        _startListeningLoop(speech, service, detectionService, notifications);
+      });
     },
   );
 
   if (available) {
-    _startListeningLoop(speech, service, detectionService);
+    print('✅ Speech recognition initialized successfully');
+    _startListeningLoop(speech, service, detectionService, notifications);
+  } else {
+    print('❌ Speech recognition not available');
+    await notifications.show(
+      888,
+      '❌ Voice Recognition Failed',
+      'Please check microphone permissions',
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'my_foreground',
+          'Guardian Service',
+          importance: Importance.high,
+          priority: Priority.high,
+        ),
+      ),
+    );
   }
 
   service.on('stopService').listen((event) {
+    print('🛑 Stopping background service...');
+    speech.stop();
     detectionService.dispose();
     service.stopSelf();
   });
@@ -186,44 +213,61 @@ bool onIosBackground(ServiceInstance service) {
   return true;
 }
 
-void _startListeningLoop(SpeechToText speech, ServiceInstance service, CombinedDetectionService detectionService) async {
-  if (speech.isListening) return;
+void _startListeningLoop(
+  SpeechToText speech, 
+  ServiceInstance service, 
+  CombinedDetectionService detectionService,
+  FlutterLocalNotificationsPlugin notifications,
+) async {
+  if (speech.isListening) {
+    print('⚠️ Already listening, skipping...');
+    return;
+  }
 
   try {
+    print('🎤 Starting to listen for "Help"...');
+    
     await speech.listen(
       onResult: (result) {
         String words = result.recognizedWords.toLowerCase();
-        print('🎤 Heard: "$words"');
+        print('🎤 Heard: "$words" (confidence: ${result.confidence})');
 
-        if (words.contains('help')) {
-          print('🚨 WAKE WORD "HELP" DETECTED!');
+        // Check for wake words
+        if (words.contains('help') || 
+            words.contains('emergency') || 
+            words.contains('danger')) {
+          print('🚨 WAKE WORD DETECTED: "$words"');
 
           // Show notification
-          FlutterLocalNotificationsPlugin().show(
+          notifications.show(
             888,
             '🚨 THREAT DETECTION ACTIVATED',
             'Recording audio and movement for 10 seconds...',
             const NotificationDetails(
               android: AndroidNotificationDetails(
                 'my_foreground',
-                'MY FOREGROUND SERVICE',
+                'Guardian Service',
                 importance: Importance.high,
                 priority: Priority.high,
+                playSound: true,
+                enableVibration: true,
               ),
             ),
           );
 
-          // Start combined detection (will auto-trigger emergency if threat detected)
+          // Start combined detection
           detectionService.startDetection();
         }
       },
-      listenFor: const Duration(seconds: 10),
-      pauseFor: const Duration(seconds: 3),
+      listenFor: const Duration(seconds: 30),
+      pauseFor: const Duration(seconds: 5),
       listenMode: ListenMode.dictation,
+      cancelOnError: false,
+      partialResults: true,
     );
   } catch (e) {
     print('❌ Listen error: $e');
-    await Future.delayed(const Duration(seconds: 2));
-    _startListeningLoop(speech, service, detectionService);
+    await Future.delayed(const Duration(seconds: 3));
+    _startListeningLoop(speech, service, detectionService, notifications);
   }
 }

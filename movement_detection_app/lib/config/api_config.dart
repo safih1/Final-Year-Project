@@ -8,7 +8,7 @@ class ApiConfig {
   /// Your computer's local IP address
   /// Find it by running: ipconfig (Windows) or ifconfig (Mac/Linux)
   /// Look for "IPv4 Address" under your active network adapter
-  static const String _ipAddress = '192.168.1.8';  // ⬅️ CHANGE THIS TO YOUR IP
+  static const String _ipAddress = '192.168.1.14';  // ⬅️ CHANGE THIS TO YOUR IP
   
   /// Django server port (default: 8000)
   static const String _port = '8000';
