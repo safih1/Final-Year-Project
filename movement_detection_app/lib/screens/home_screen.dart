@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:secure_step/services/background_service.dart';
 import 'package:secure_step/services/combined_detection_service.dart';
 import 'dart:async';

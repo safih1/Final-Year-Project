@@ -32,6 +32,7 @@ migrate_working_dir/
 .pub-cache/
 .pub/
 /build/
+windows/flutter/ephemeral/flutter_windows.dll.pdb
 
 # Symbolication related
 app.*.symbols
