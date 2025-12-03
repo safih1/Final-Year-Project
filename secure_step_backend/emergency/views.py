@@ -75,21 +75,35 @@ class EmergencyContactDetailView(generics.RetrieveUpdateDestroyAPIView):
 @permission_classes([IsAuthenticated])
 def trigger_emergency(request):
     """Trigger an emergency alert with WebSocket broadcast"""
-    logger.info(f"Emergency trigger request from user {request.user.email}")
-    data = request.data.copy()
-    
-    # Create emergency alert
-    serializer = EmergencyAlertSerializer(data=data, context={'request': request})
-    
-    if serializer.is_valid():
+    try:
+        logger.info(f"=" * 80)
+        logger.info(f"EMERGENCY TRIGGER - User: {request.user.email}")
+        logger.info(f"Request data: {request.data}")
+        logger.info(f"=" * 80)
+        
+        data = request.data.copy()
+        
+        # Create emergency alert
+        serializer = EmergencyAlertSerializer(data=data, context={'request': request})
+        
+        if not serializer.is_valid():
+            logger.error(f"Validation errors: {serializer.errors}")
+            return Response({
+                'error': 'Validation failed',
+                'details': serializer.errors,
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Save alert
         alert = serializer.save()
+        logger.info(f"✅ Alert created with ID: {alert.id}")
         
         # Update user's emergency count
         user = request.user
         user.emergency_count += 1
         user.save()
+        logger.info(f"✅ Updated emergency count: {user.emergency_count}")
         
-        # BROADCAST VIA WEBSOCKET TO POLICE DASHBOARD
+        # BROADCAST VIA WEBSOCKET
         try:
             channel_layer = get_channel_layer()
             async_to_sync(channel_layer.group_send)(
@@ -107,25 +121,40 @@ def trigger_emergency(request):
                     'timestamp': alert.created_at.isoformat(),
                 }
             )
-            logger.info(f"Emergency alert {alert.id} broadcasted via WebSocket")
+            logger.info(f"✅ WebSocket broadcast sent")
         except Exception as e:
-            logger.error(f"WebSocket broadcast failed: {e}")
+            logger.error(f"⚠️ WebSocket broadcast failed: {e}")
+            # Don't fail the request
         
-        # Send SMS notifications asynchronously (with error handling)
+        # Send SMS notifications asynchronously
         try:
             send_emergency_notifications.delay(alert.id)
-            logger.info(f"Emergency notifications queued for alert {alert.id}")
+            logger.info(f"✅ Notifications queued")
         except Exception as e:
-            logger.warning(f"Could not queue emergency notifications: {e}")
+            logger.warning(f"⚠️ Could not queue notifications: {e}")
+            # Don't fail the request
         
         return Response({
             'message': 'Emergency alert triggered successfully',
             'alert': serializer.data
         }, status=status.HTTP_201_CREATED)
-    
-    logger.error(f"Emergency trigger failed: {serializer.errors}")
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
+        
+    except Exception as e:
+        logger.error(f"!" * 80)
+        logger.error(f"CRITICAL ERROR in trigger_emergency")
+        logger.error(f"Error: {str(e)}")
+        logger.error(f"Type: {type(e).__name__}")
+        
+        import traceback
+        logger.error(f"Traceback:\n{traceback.format_exc()}")
+        logger.error(f"!" * 80)
+        
+        return Response({
+            'error': 'Server error',
+            'message': str(e),
+            'type': type(e).__name__
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
 
 class EmergencyAlertListView(generics.ListAPIView):
     serializer_class = EmergencyAlertSerializer

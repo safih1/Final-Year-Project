@@ -18,7 +18,7 @@ class LocationBackgroundService {
         initialNotificationTitle: 'Police Service Active',
         initialNotificationContent: 'Updating location in background...',
         foregroundServiceNotificationId: 222,
-        notificationIcon: 'ic_police', // <<< FIXED
+        
       ),
       iosConfiguration: IosConfiguration(
         autoStart: false,

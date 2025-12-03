@@ -1,492 +1,516 @@
-# Police Response System APIs
-
-from rest_framework import status, permissions
 from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework import status
+from django.contrib.auth import authenticate
 from django.utils import timezone
+from rest_framework_simplejwt.tokens import RefreshToken
+from .models import PoliceOfficer, DispatchTask, EmergencyAlert
+from django.contrib.auth import get_user_model
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
+from math import radians, sin, cos, sqrt, atan2
 import logging
-from math import radians, cos, sin, asin, sqrt
-
-from .models import PoliceOfficer, EmergencyAlert, DispatchTask
 
 logger = logging.getLogger(__name__)
+User = get_user_model()
 
-def haversine(lon1, lat1, lon2, lat2):
-    """
-    Calculate the great circle distance between two points 
-    on the earth (specified in decimal degrees)
-    Returns distance in kilometers
-    """
-    # convert decimal degrees to radians 
-    lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
-    
-    # haversine formula 
-    dlon = lon2 - lon1 
-    dlat = lat2 - lat1 
-    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
-    c = 2 * asin(sqrt(a)) 
-    km = 6371 * c
-    return km
-
+# ============================================
+# AUTHENTICATION ENDPOINTS
+# ============================================
 
 @api_view(['POST'])
-@permission_classes([permissions.AllowAny])
-def police_login(request):
-    """
-    Police officer login - checks role is mobile_officer
-    """
-    from django.contrib.auth import authenticate
-    from rest_framework_simplejwt.tokens import RefreshToken
-    
-    email = request.data.get('email')
-    password = request.data.get('password')
-    
-    if not email or not password:
-        return Response({'error': 'Email and password required'}, status=status.HTTP_400_BAD_REQUEST)
-    
-    user = authenticate(email=email, password=password)
-    
-    if not user:
-        return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
-    
-    # Check if user is a mobile officer
-    if user.role != 'mobile_officer':
-        return Response({'error': 'Access denied. Mobile officer role required.'}, status=status.HTTP_403_FORBIDDEN)
-    
-    # Get or create police officer profile
-    try:
-        officer = PoliceOfficer.objects.get(user=user)
-    except PoliceOfficer.DoesNotExist:
-        return Response({'error': 'Officer profile not found'}, status=status.HTTP_404_NOT_FOUND)
-    
-    # Generate tokens
-    refresh = RefreshToken.for_user(user)
-    
-    return Response({
-        'tokens': {
-            'refresh': str(refresh),
-            'access': str(refresh.access_token),
-        },
-        'user': {
-            'id': user.id,
-            'email': user.email,
-            'full_name': user.full_name,
-            'role': user.role,
-        },
-        'officer': {
-            'id': officer.id,
-            'badge_number': officer.badge_number,
-            'rank': officer.rank,
-            'station': officer.station,
-            'status': officer.status,
-        }
-    })
-
-@api_view(['POST'])
-@permission_classes([permissions.AllowAny])
+@permission_classes([AllowAny])
 def police_register(request):
-    """
-    Register a new police officer
-    """
-    from django.contrib.auth import get_user_model
-    from rest_framework_simplejwt.tokens import RefreshToken
-    
-    User = get_user_model()
-    
-    email = request.data.get('email')
-    password = request.data.get('password')
-    full_name = request.data.get('full_name')
-    badge_number = request.data.get('badge_number')
-    rank = request.data.get('rank', 'Officer')
-    station = request.data.get('station', 'Main Station')
-    
-    if not all([email, password, full_name, badge_number]):
-        return Response(
-            {'error': 'Email, password, full name, and badge number are required'}, 
-            status=status.HTTP_400_BAD_REQUEST
-        )
-        
-    if User.objects.filter(email=email).exists():
-        return Response({'error': 'Email already registered'}, status=status.HTTP_400_BAD_REQUEST)
-        
-    if PoliceOfficer.objects.filter(badge_number=badge_number).exists():
-        return Response({'error': 'Badge number already registered'}, status=status.HTTP_400_BAD_REQUEST)
-    
+    """Register a new police officer"""
     try:
-        # Create User
+        data = request.data
+        
+        # Create user account
         user = User.objects.create_user(
-            username=email,
-            email=email,
-            password=password,
-            full_name=full_name,
-            role='mobile_officer'
+            username=data['email'],
+            email=data['email'],
+            password=data['password'],
+            full_name=data['full_name'],
+            role='police'
         )
         
-        # Create Officer Profile
+        # Create police officer profile
         officer = PoliceOfficer.objects.create(
             user=user,
-            badge_number=badge_number,
-            rank=rank,
-            station=station,
+            badge_number=data['badge_number'],
+            rank=data.get('rank', 'Officer'),
+            station=data.get('station', 'Main Station'),
             status='offline'
         )
         
         # Generate tokens
         refresh = RefreshToken.for_user(user)
         
+        logger.info(f"✅ Police officer registered: {user.email}")
+        
         return Response({
-            'message': 'Registration successful',
+            'message': 'Officer registered successfully',
+            'officer': {
+                'id': officer.id,
+                'badge_number': officer.badge_number,
+                'rank': officer.rank,
+                'station': officer.station
+            },
             'tokens': {
-                'refresh': str(refresh),
                 'access': str(refresh.access_token),
-            },
-            'user': {
-                'id': user.id,
-                'email': user.email,
-                'full_name': user.full_name,
-                'role': user.role,
-            },
+                'refresh': str(refresh)
+            }
+        }, status=status.HTTP_201_CREATED)
+        
+    except Exception as e:
+        logger.error(f"Registration error: {e}")
+        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def police_login(request):
+    """Police officer login"""
+    try:
+        email = request.data.get('email')
+        password = request.data.get('password')
+        
+        user = authenticate(email=email, password=password)
+        
+        if not user:
+            return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        if user.role != 'police':
+            return Response({'error': 'Not authorized as police'}, status=status.HTTP_403_FORBIDDEN)
+        
+        # Get officer profile
+        try:
+            officer = PoliceOfficer.objects.get(user=user)
+            officer.status = 'available'
+            officer.save()
+        except PoliceOfficer.DoesNotExist:
+            return Response({'error': 'Officer profile not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Generate tokens
+        refresh = RefreshToken.for_user(user)
+        
+        logger.info(f"✅ Officer logged in: {user.email}")
+        
+        return Response({
+            'message': 'Login successful',
             'officer': {
                 'id': officer.id,
                 'badge_number': officer.badge_number,
                 'rank': officer.rank,
                 'station': officer.station,
-                'status': officer.status,
+                'status': officer.status
+            },
+            'tokens': {
+                'access': str(refresh.access_token),
+                'refresh': str(refresh)
             }
-        }, status=status.HTTP_201_CREATED)
+        })
         
     except Exception as e:
-        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        logger.error(f"Login error: {e}")
+        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def get_available_officers(request):
-    """
-    Get all free officers with their locations
-    Admin only
-    """
-    if request.user.role != 'admin':
-        return Response({'error': 'Admin access required'}, status=status.HTTP_403_FORBIDDEN)
-    
-    officers = PoliceOfficer.objects.filter(status='free')
-    
-    data = []
-    for officer in officers:
-        data.append({
-            'id': officer.id,
-            'badge_number': officer.badge_number,
-            'name': officer.user.full_name,
-            'status': officer.status,
-            'location': {
-                'latitude': float(officer.current_latitude) if officer.current_latitude else None,
-                'longitude': float(officer.current_longitude) if officer.current_longitude else None,
-            },
-            'last_update': officer.last_location_update.isoformat() if officer.last_location_update else None,
-        })
-    
-    return Response(data)
-
+# ============================================
+# LOCATION MANAGEMENT
+# ============================================
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def update_officer_location_new(request):
     """
-    Update officer's current location
-    Mobile officer only
+    Officer updates their current location
+    This runs every 5-15 seconds from the companion app
     """
-    if request.user.role != 'mobile_officer':
-        return Response({'error': 'Mobile officer access required'}, status=status.HTTP_403_FORBIDDEN)
-    
     try:
         officer = PoliceOfficer.objects.get(user=request.user)
+        
+        latitude = request.data.get('latitude')
+        longitude = request.data.get('longitude')
+        
+        if not latitude or not longitude:
+            return Response({'error': 'Latitude and longitude required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Update officer location
+        officer.current_latitude = latitude
+        officer.current_longitude = longitude
+        officer.last_location_update = timezone.now()
+        officer.save()
+        
+        logger.info(f"📍 Officer {officer.badge_number} location updated: {latitude}, {longitude}")
+        
+        # Find active tasks for this officer
+        active_tasks = DispatchTask.objects.filter(
+            officer=officer,
+            status__in=['accepted', 'en_route']
+        )
+        
+        # Broadcast location to each emergency's user channel
+        channel_layer = get_channel_layer()
+        for task in active_tasks:
+            emergency = task.emergency
+            user_id = emergency.user.id
+            
+            # Send to user's WebSocket channel
+            async_to_sync(channel_layer.group_send)(
+                f"user_{user_id}",
+                {
+                    'type': 'officer_location',
+                    'officer_id': officer.id,
+                    'officer_name': f"{officer.rank} {officer.user.full_name}",
+                    'badge_number': officer.badge_number,
+                    'emergency_id': emergency.id,
+                    'coordinates': {
+                        'lat': float(latitude),
+                        'lng': float(longitude)
+                    },
+                    'timestamp': timezone.now().isoformat(),
+                    'eta': calculate_eta(latitude, longitude, emergency.location_latitude, emergency.location_longitude)
+                }
+            )
+            
+            logger.info(f"📡 Location broadcasted to user_{user_id}")
+        
+        return Response({
+            'message': 'Location updated',
+            'active_tasks': active_tasks.count()
+        })
+        
     except PoliceOfficer.DoesNotExist:
         return Response({'error': 'Officer profile not found'}, status=status.HTTP_404_NOT_FOUND)
-    
-    latitude = request.data.get('latitude')
-    longitude = request.data.get('longitude')
-    
-    if latitude is None or longitude is None:
-        return Response({'error': 'Latitude and longitude required'}, status=status.HTTP_400_BAD_REQUEST)
-    
-    officer.current_latitude = latitude
-    officer.current_longitude = longitude
-    officer.last_location_update = timezone.now()
-    officer.save()
-    
-    # Broadcast location update via WebSocket
-    try:
-        channel_layer = get_channel_layer()
-        async_to_sync(channel_layer.group_send)(
-            "police_dashboard",
-            {
-                'type': 'officer_location_update',
-                'officer_id': officer.id,
-                'badge_number': officer.badge_number,
-                'name': officer.user.full_name,
-                'status': officer.status,
-                'coordinates': {
-                    'lat': float(latitude),
-                    'lng': float(longitude),
-                },
-                'timestamp': officer.last_location_update.isoformat(),
-            }
-        )
     except Exception as e:
-        logger.error(f"WebSocket broadcast failed: {e}")
-    
-    return Response({'message': 'Location updated successfully'})
+        logger.error(f"Location update error: {e}")
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ============================================
+# OFFICER MANAGEMENT
+# ============================================
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_available_officers(request):
+    """Get all available officers with their locations"""
+    try:
+        officers = PoliceOfficer.objects.filter(
+            is_active=True,
+            status__in=['available', 'on_patrol']
+        ).select_related('user')
+        
+        data = []
+        for officer in officers:
+            data.append({
+                'id': officer.id,
+                'name': officer.user.full_name,
+                'badge_number': officer.badge_number,
+                'rank': officer.rank,
+                'station': officer.station,
+                'status': officer.status,
+                'location': {
+                    'latitude': float(officer.current_latitude) if officer.current_latitude else None,
+                    'longitude': float(officer.current_longitude) if officer.current_longitude else None,
+                    'last_update': officer.last_location_update.isoformat() if officer.last_location_update else None
+                }
+            })
+        
+        return Response(data)
+        
+    except Exception as e:
+        logger.error(f"Error fetching officers: {e}")
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_nearest_officer(request, emergency_id):
-    """
-    Calculate and return the nearest available officer to an emergency
-    Admin only
-    """
-    if request.user.role != 'admin':
-        return Response({'error': 'Admin access required'}, status=status.HTTP_403_FORBIDDEN)
-    
+    """Find nearest available officer to an emergency"""
     try:
         emergency = EmergencyAlert.objects.get(id=emergency_id)
-    except EmergencyAlert.DoesNotExist:
-        return Response({'error': 'Emergency not found'}, status=status.HTTP_404_NOT_FOUND)
-    
-    if not emergency.location_latitude or not emergency.location_longitude:
-        return Response({'error': 'Emergency location not available'}, status=status.HTTP_400_BAD_REQUEST)
-    
-    # Get all free officers with location data
-    officers = PoliceOfficer.objects.filter(
-        status='free',
-        current_latitude__isnull=False,
-        current_longitude__isnull=False
-    )
-    
-    if not officers.exists():
-        return Response({'error': 'No available officers'}, status=status.HTTP_404_NOT_FOUND)
-    
-    # Calculate distances
-    nearest_officer = None
-    min_distance = float('inf')
-    
-    emergency_lat = float(emergency.location_latitude)
-    emergency_lon = float(emergency.location_longitude)
-    
-    officers_with_distance = []
-    
-    for officer in officers:
-        officer_lat = float(officer.current_latitude)
-        officer_lon = float(officer.current_longitude)
         
-        distance = haversine(emergency_lon, emergency_lat, officer_lon, officer_lat)
+        if not emergency.location_latitude or not emergency.location_longitude:
+            return Response({'error': 'Emergency location not available'}, status=status.HTTP_400_BAD_REQUEST)
         
-        officers_with_distance.append({
-            'officer': officer,
-            'distance': distance
-        })
+        available_officers = PoliceOfficer.objects.filter(
+            is_active=True,
+            status__in=['available', 'on_patrol'],
+            current_latitude__isnull=False,
+            current_longitude__isnull=False
+        )
         
-        if distance < min_distance:
-            min_distance = distance
-            nearest_officer = officer
-    
-    # Sort by distance
-    officers_with_distance.sort(key=lambda x: x['distance'])
-    
-    return Response({
-        'nearest_officer': {
-            'id': nearest_officer.id,
-            'badge_number': nearest_officer.badge_number,
-            'name': nearest_officer.user.full_name,
-            'distance_km': round(min_distance, 2),
-            'location': {
-                'latitude': float(nearest_officer.current_latitude),
-                'longitude': float(nearest_officer.current_longitude),
-            }
-        },
-        'all_available_officers': [
-            {
-                'id': item['officer'].id,
-                'badge_number': item['officer'].badge_number,
-                'name': item['officer'].user.full_name,
-                'distance_km': round(item['distance'], 2),
+        nearest_officer = None
+        min_distance = float('inf')
+        
+        for officer in available_officers:
+            distance = calculate_distance(
+                float(emergency.location_latitude),
+                float(emergency.location_longitude),
+                float(officer.current_latitude),
+                float(officer.current_longitude)
+            )
+            
+            if distance < min_distance:
+                min_distance = distance
+                nearest_officer = officer
+        
+        if not nearest_officer:
+            return Response({'error': 'No available officers found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        return Response({
+            'officer': {
+                'id': nearest_officer.id,
+                'name': nearest_officer.user.full_name,
+                'badge_number': nearest_officer.badge_number,
+                'distance_km': round(min_distance, 2),
                 'location': {
-                    'latitude': float(item['officer'].current_latitude),
-                    'longitude': float(item['officer'].current_longitude),
+                    'latitude': float(nearest_officer.current_latitude),
+                    'longitude': float(nearest_officer.current_longitude)
                 }
             }
-            for item in officers_with_distance
-        ]
-    })
+        })
+        
+    except EmergencyAlert.DoesNotExist:
+        return Response({'error': 'Emergency not found'}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f"Error finding nearest officer: {e}")
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
+# ============================================
+# DISPATCH TASK MANAGEMENT
+# ============================================
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def assign_officer(request):
     """
     Assign an officer to an emergency
-    Admin only
+    Called by the web dashboard after finding nearest officer
     """
-    if request.user.role != 'admin':
-        return Response({'error': 'Admin access required'}, status=status.HTTP_403_FORBIDDEN)
-    
-    officer_id = request.data.get('officer_id')
-    emergency_id = request.data.get('emergency_id')
-    
-    if not officer_id or not emergency_id:
-        return Response({'error': 'Officer ID and Emergency ID required'}, status=status.HTTP_400_BAD_REQUEST)
-    
     try:
+        officer_id = request.data.get('officer_id')
+        emergency_id = request.data.get('emergency_id')
+        
         officer = PoliceOfficer.objects.get(id=officer_id)
         emergency = EmergencyAlert.objects.get(id=emergency_id)
-    except PoliceOfficer.DoesNotExist:
-        return Response({'error': 'Officer not found'}, status=status.HTTP_404_NOT_FOUND)
-    except EmergencyAlert.DoesNotExist:
-        return Response({'error': 'Emergency not found'}, status=status.HTTP_404_NOT_FOUND)
-    
-    if officer.status != 'free':
-        return Response({'error': 'Officer is not available'}, status=status.HTTP_400_BAD_REQUEST)
-    
-    # Create dispatch task
-    task = DispatchTask.objects.create(
-        officer=officer,
-        emergency=emergency,
-        status='pending'
-    )
-    
-    # Update officer status
-    officer.status = 'assigned'
-    officer.save()
-    
-    # Send notification to officer via WebSocket
-    try:
+        
+        # Create dispatch task
+        task = DispatchTask.objects.create(
+            emergency=emergency,
+            officer=officer,
+            status='pending'
+        )
+        
+        # Update officer status
+        officer.status = 'busy'
+        officer.save()
+        
+        logger.info(f"✅ Officer {officer.badge_number} assigned to emergency {emergency_id}")
+        
+        # Notify officer via WebSocket
         channel_layer = get_channel_layer()
         async_to_sync(channel_layer.group_send)(
             f"officer_{officer.id}",
             {
-                'type': 'task_assigned',
+                'type': 'new_task',
                 'task_id': task.id,
-                'emergency_id': emergency.id,
-                'victim_name': emergency.user.full_name,
-                'location': {
-                    'latitude': float(emergency.location_latitude) if emergency.location_latitude else None,
-                    'longitude': float(emergency.location_longitude) if emergency.location_longitude else None,
-                    'address': emergency.location_address,
-                },
-                'description': emergency.description,
-                'timestamp': task.assigned_at.isoformat(),
+                'emergency': {
+                    'id': emergency.id,
+                    'victim_name': emergency.user.full_name,
+                    'location': emergency.location_address,
+                    'coordinates': {
+                        'lat': float(emergency.location_latitude) if emergency.location_latitude else None,
+                        'lng': float(emergency.location_longitude) if emergency.location_longitude else None
+                    },
+                    'description': emergency.description,
+                    'timestamp': emergency.created_at.isoformat()
+                }
             }
         )
+        
+        logger.info(f"📡 Task notification sent to officer_{officer.id}")
+        
+        return Response({
+            'message': 'Officer assigned successfully',
+            'task_id': task.id,
+            'officer': {
+                'id': officer.id,
+                'name': officer.user.full_name,
+                'badge_number': officer.badge_number
+            }
+        }, status=status.HTTP_201_CREATED)
+        
+    except PoliceOfficer.DoesNotExist:
+        return Response({'error': 'Officer not found'}, status=status.HTTP_404_NOT_FOUND)
+    except EmergencyAlert.DoesNotExist:
+        return Response({'error': 'Emergency not found'}, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
-        logger.error(f"WebSocket notification failed: {e}")
-    
-    return Response({
-        'message': 'Officer assigned successfully',
-        'task_id': task.id,
-        'officer': {
-            'id': officer.id,
-            'badge_number': officer.badge_number,
-            'name': officer.user.full_name,
-        }
-    })
+        logger.error(f"Assignment error: {e}")
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_officer_tasks(request):
-    """
-    Get tasks assigned to the logged-in officer
-    Mobile officer only
-    """
-    if request.user.role != 'mobile_officer':
-        return Response({'error': 'Mobile officer access required'}, status=status.HTTP_403_FORBIDDEN)
-    
+    """Get all tasks for the authenticated officer"""
     try:
         officer = PoliceOfficer.objects.get(user=request.user)
+        
+        tasks = DispatchTask.objects.filter(
+            officer=officer
+        ).select_related('emergency', 'emergency__user').order_by('-assigned_at')
+        
+        data = []
+        for task in tasks:
+            emergency = task.emergency
+            data.append({
+                'id': task.id,
+                'status': task.status,
+                'assigned_at': task.assigned_at.isoformat(),
+                'emergency': {
+                    'id': emergency.id,
+                    'victim_name': emergency.user.full_name,
+                    'victim_phone': emergency.user.phone_number if hasattr(emergency.user, 'phone_number') else None,
+                    'location': emergency.location_address,
+                    'coordinates': {
+                        'latitude': float(emergency.location_latitude) if emergency.location_latitude else None,
+                        'longitude': float(emergency.location_longitude) if emergency.location_longitude else None
+                    },
+                    'description': emergency.description,
+                    'timestamp': emergency.created_at.isoformat()
+                }
+            })
+        
+        return Response(data)
+        
     except PoliceOfficer.DoesNotExist:
         return Response({'error': 'Officer profile not found'}, status=status.HTTP_404_NOT_FOUND)
-    
-    tasks = DispatchTask.objects.filter(officer=officer).exclude(status='resolved')
-    
-    data = []
-    for task in tasks:
-        data.append({
-            'id': task.id,
-            'status': task.status,
-            'emergency': {
-                'id': task.emergency.id,
-                'victim_name': task.emergency.user.full_name,
-                'location': {
-                    'latitude': float(task.emergency.location_latitude) if task.emergency.location_latitude else None,
-                    'longitude': float(task.emergency.location_longitude) if task.emergency.location_longitude else None,
-                    'address': task.emergency.location_address,
-                },
-                'description': task.emergency.description,
-            },
-            'assigned_at': task.assigned_at.isoformat(),
-            'accepted_at': task.accepted_at.isoformat() if task.accepted_at else None,
-        })
-    
-    return Response(data)
+    except Exception as e:
+        logger.error(f"Error fetching tasks: {e}")
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['PUT'])
 @permission_classes([IsAuthenticated])
-def update_task_status(request, task_id):
-    """
-    Update task status (accept, decline, en_route, arrived, resolved)
-    Mobile officer only
-    """
-    if request.user.role != 'mobile_officer':
-        return Response({'error': 'Mobile officer access required'}, status=status.HTTP_403_FORBIDDEN)
-    
+def update_task_status(request, pk):
+    """Update task status (accept, decline, en_route, arrived, resolved)"""
     try:
-        officer = PoliceOfficer.objects.get(user=request.user)
-        task = DispatchTask.objects.get(id=task_id, officer=officer)
-    except PoliceOfficer.DoesNotExist:
-        return Response({'error': 'Officer profile not found'}, status=status.HTTP_404_NOT_FOUND)
-    except DispatchTask.DoesNotExist:
-        return Response({'error': 'Task not found'}, status=status.HTTP_404_NOT_FOUND)
-    
-    new_status = request.data.get('status')
-    
-    if new_status not in ['accepted', 'declined', 'en_route', 'arrived', 'resolved']:
-        return Response({'error': 'Invalid status'}, status=status.HTTP_400_BAD_REQUEST)
-    
-    task.status = new_status
-    
-    if new_status == 'accepted':
-        task.accepted_at = timezone.now()
-    elif new_status == 'arrived':
-        task.arrived_at = timezone.now()
-    elif new_status == 'resolved':
-        task.resolved_at = timezone.now()
-        officer.status = 'free'
-        officer.save()
-    elif new_status == 'declined':
-        officer.status = 'free'
-        officer.save()
-    
-    task.save()
-    
-    # Broadcast status update
-    try:
+        task = DispatchTask.objects.get(id=pk, officer__user=request.user)
+        new_status = request.data.get('status')
+        
+        if new_status not in ['accepted', 'declined', 'en_route', 'arrived', 'resolved']:
+            return Response({'error': 'Invalid status'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        old_status = task.status
+        task.status = new_status
+        
+        if new_status == 'accepted':
+            task.accepted_at = timezone.now()
+            task.officer.status = 'en_route'
+        elif new_status == 'arrived':
+            task.officer.status = 'on_scene'
+        elif new_status == 'resolved':
+            task.resolved_at = timezone.now()
+            task.officer.status = 'available'
+            task.emergency.status = 'resolved'
+            task.emergency.resolved_at = timezone.now()
+            task.emergency.save()
+        elif new_status == 'declined':
+            task.officer.status = 'available'
+        
+        task.officer.save()
+        task.save()
+        
+        logger.info(f"✅ Task {pk} status: {old_status} → {new_status}")
+        
+        # Notify web dashboard
         channel_layer = get_channel_layer()
         async_to_sync(channel_layer.group_send)(
             "police_dashboard",
             {
                 'type': 'task_status_update',
                 'task_id': task.id,
-                'officer_id': officer.id,
                 'emergency_id': task.emergency.id,
+                'officer_id': task.officer.id,
                 'status': new_status,
-                'timestamp': timezone.now().isoformat(),
+                'timestamp': timezone.now().isoformat()
             }
         )
+        
+        # If accepted, notify the emergency user
+        if new_status == 'accepted':
+            async_to_sync(channel_layer.group_send)(
+                f"user_{task.emergency.user.id}",
+                {
+                    'type': 'officer_assigned',
+                    'officer_name': f"{task.officer.rank} {task.officer.user.full_name}",
+                    'badge_number': task.officer.badge_number,
+                    'emergency_id': task.emergency.id,
+                    'message': 'An officer has been assigned to your emergency'
+                }
+            )
+        
+        # If resolved, notify user
+        if new_status == 'resolved':
+            async_to_sync(channel_layer.group_send)(
+                f"user_{task.emergency.user.id}",
+                {
+                    'type': 'emergency_resolved',
+                    'emergency_id': task.emergency.id,
+                    'message': 'Your emergency has been resolved'
+                }
+            )
+        
+        return Response({
+            'message': f'Task status updated to {new_status}',
+            'task': {
+                'id': task.id,
+                'status': task.status
+            }
+        })
+        
+    except DispatchTask.DoesNotExist:
+        return Response({'error': 'Task not found'}, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
-        logger.error(f"WebSocket broadcast failed: {e}")
+        logger.error(f"Status update error: {e}")
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ============================================
+# UTILITY FUNCTIONS
+# ============================================
+
+def calculate_distance(lat1, lon1, lat2, lon2):
+    """
+    Calculate distance between two points using Haversine formula
+    Returns distance in kilometers
+    """
+    R = 6371  # Earth's radius in km
     
-    return Response({'message': f'Task status updated to {new_status}'})
+    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+    
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    
+    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+    c = 2 * atan2(sqrt(a), sqrt(1-a))
+    
+    return R * c
+
+
+def calculate_eta(officer_lat, officer_lon, emergency_lat, emergency_lon):
+    """
+    Calculate estimated time of arrival
+    Assumes average speed of 60 km/h
+    Returns ETA in minutes
+    """
+    distance = calculate_distance(officer_lat, officer_lon, emergency_lat, emergency_lon)
+    speed = 60  # km/h
+    eta_hours = distance / speed
+    eta_minutes = int(eta_hours * 60)
+    return max(1, eta_minutes)  # Minimum 1 minute

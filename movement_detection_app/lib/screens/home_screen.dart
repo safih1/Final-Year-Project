@@ -478,70 +478,70 @@ class _HomeScreenState extends State<HomeScreen> {
   }
   
   void _triggerEmergencyLogic() async {
-    if (widget.loggedInUser == null || widget.loggedInUser!['email'] == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Error: User not logged in properly.')),
-      );
-      return;
-    }
-
+  if (widget.loggedInUser == null || widget.loggedInUser!['email'] == null) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Fetching location & triggering alert...')),
+      const SnackBar(content: Text('Error: User not logged in properly.')),
+    );
+    return;
+  }
+
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(content: Text('Fetching location & triggering alert...')),
+  );
+
+  try {
+    final position = await _getCurrentPosition();
+    final double currentLat = position.latitude;
+    final double currentLng = position.longitude;
+    final String currentLocation =
+        "Lat: ${currentLat.toStringAsFixed(5)}, Lng: ${currentLng.toStringAsFixed(5)}";
+
+    final result = await _apiService.triggerEmergency(
+      alertType: 'manual',  // ✅ FIXED - Changed from 'automstic' to 'manual'
+      address: currentLocation,
+      latitude: currentLat,
+      longitude: currentLng,
+      description: 'Manual emergency trigger from app',
     );
 
-    try {
-      final position = await _getCurrentPosition();
-      final double currentLat = position.latitude;
-      final double currentLng = position.longitude;
-      final String currentLocation =
-          "Lat: ${currentLat.toStringAsFixed(5)}, Lng: ${currentLng.toStringAsFixed(5)}";
-
-      final result = await _apiService.triggerEmergency(
-        alertType: 'automstic',
-        address: currentLocation,
-        latitude: currentLat,
-        longitude: currentLng,
-        description: 'Manual emergency trigger from app',
+    if (result['alert'] != null) {
+      _wsService.sendEmergencyTrigger(
+        alertId: result['alert']['id'],
+        userId: widget.loggedInUser!['id'],
+        userName: widget.loggedInUser!['full_name'] ??
+            widget.loggedInUser!['fullName'] ??
+            'Unknown User',
+        location: currentLocation,
+        coordinates: {
+          'lat': currentLat,
+          'lng': currentLng,
+        },
       );
 
-      if (result['alert'] != null) {
-        _wsService.sendEmergencyTrigger(
-          alertId: result['alert']['id'],
-          userId: widget.loggedInUser!['id'],
-          userName: widget.loggedInUser!['full_name'] ??
-              widget.loggedInUser!['fullName'] ??
-              'Unknown User',
-          location: currentLocation,
-          coordinates: {
-            'lat': currentLat,
-            'lng': currentLng,
-          },
-        );
+      widget.onUpdateEmergencyData(widget.loggedInUser!['email'], currentLocation);
 
-        widget.onUpdateEmergencyData(widget.loggedInUser!['email'], currentLocation);
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Emergency alert sent with your live location!'),
-            backgroundColor: Colors.orange,
-            duration: Duration(seconds: 5),
-          ),
-        );
-
-        print("Emergency triggered for user: ${widget.loggedInUser!['email']} at $currentLocation");
-      } else {
-        throw Exception('Failed to create emergency alert');
-      }
-    } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error triggering emergency: $e'),
-          backgroundColor: Colors.red,
+        const SnackBar(
+          content: Text('Emergency alert sent with your live location!'),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 5),
         ),
       );
-      print("Error triggering emergency: $e");
+
+      print("Emergency triggered for user: ${widget.loggedInUser!['email']} at $currentLocation");
+    } else {
+      throw Exception('Failed to create emergency alert');
     }
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Error triggering emergency: $e'),
+        backgroundColor: Colors.red,
+      ),
+    );
+    print("Error triggering emergency: $e");
   }
+}
 
   void _callPolice() {
     _confirmAndTriggerEmergency();

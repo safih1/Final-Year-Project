@@ -48,7 +48,7 @@ class CombinedDetectionService {
     _sensorData.clear();
 
     onStatusUpdate?.call('🎤 Recording audio and movement...');
-    print('🚨 THREAT DETECTION STARTED - Recording for 10 seconds');
+    print('🚨 THREAT DETECTION STARTED - Recording for 5 seconds');
 
     // Start audio recording
     String? audioPath = await _startAudioRecording();
@@ -57,7 +57,7 @@ class CombinedDetectionService {
     _startSensorRecording();
 
     // Record for 10 seconds
-    await Future.delayed(const Duration(seconds: 10));
+    await Future.delayed(const Duration(seconds: 5));
 
     // Stop recording
     await _stopRecording(audioPath);

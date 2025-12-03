@@ -2,6 +2,9 @@ from rest_framework import serializers
 from .models import EmergencyContact, EmergencyAlert, EmergencySettings
 from .models import OfficerLocation
 import re
+import logging
+
+logger = logging.getLogger(__name__)
 
 class EmergencyContactSerializer(serializers.ModelSerializer):
     class Meta:
@@ -60,10 +63,43 @@ class EmergencyAlertSerializer(serializers.ModelSerializer):
                  'location_latitude', 'location_longitude', 'location_address', 
                  'description', 'created_at', 'resolved_at']
         read_only_fields = ['id', 'user_name', 'user_email', 'created_at']
+        extra_kwargs = {
+            'alert_type': {'required': False, 'allow_blank': True},
+            'location_latitude': {'required': False},
+            'location_longitude': {'required': False},
+            'location_address': {'required': False, 'allow_blank': True},
+            'description': {'required': False, 'allow_blank': True},
+        }
+
+    def validate_alert_type(self, value):
+        """Validate and normalize alert_type"""
+        if not value or value.strip() == '':
+            return 'panic'
+        
+        # Normalize to lowercase
+        normalized = str(value).lower().strip()
+        
+        # Get valid choices
+        valid_choices = [choice[0] for choice in EmergencyAlert.ALERT_TYPE]
+        
+        if normalized not in valid_choices:
+            logger.warning(f"Invalid alert_type '{value}'. Using 'panic'. Valid: {valid_choices}")
+            return 'panic'
+        
+        return normalized
 
     def create(self, validated_data):
+        # Ensure alert_type has a default
+        if 'alert_type' not in validated_data or not validated_data.get('alert_type'):
+            validated_data['alert_type'] = 'panic'
+        
         validated_data['user'] = self.context['request'].user
+        
+        logger.info(f"Creating EmergencyAlert with data: {validated_data}")
+        
         return super().create(validated_data)
+
+
 
 class EmergencySettingsSerializer(serializers.ModelSerializer):
     class Meta:

@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class ApiService {
+  // IMPORTANT: Update this to your backend IP
   static const String baseUrl = 'http://192.168.1.8:8000/api/emergency';
   final _storage = const FlutterSecureStorage();
 
@@ -70,10 +71,13 @@ class ApiService {
 
   Future<void> updateLocation(double lat, double lng) async {
     final token = await _storage.read(key: 'access_token');
-    if (token == null) return;
+    if (token == null) {
+      print('No access token found');
+      return;
+    }
 
     try {
-      await http.post(
+      final response = await http.post(
         Uri.parse('$baseUrl/police/officers/location/'),
         headers: {
           'Content-Type': 'application/json',
@@ -81,6 +85,10 @@ class ApiService {
         },
         body: jsonEncode({'latitude': lat, 'longitude': lng}),
       );
+
+      if (response.statusCode != 200) {
+        print('Failed to update location: ${response.statusCode}');
+      }
     } catch (e) {
       print('Error updating location: $e');
     }
@@ -98,7 +106,7 @@ class ApiService {
     if (response.statusCode == 200) {
       return jsonDecode(response.body);
     } else {
-      throw Exception('Failed to load tasks');
+      throw Exception('Failed to load tasks: ${response.body}');
     }
   }
 
@@ -116,7 +124,7 @@ class ApiService {
     );
 
     if (response.statusCode != 200) {
-      throw Exception('Failed to update task status');
+      throw Exception('Failed to update task status: ${response.body}');
     }
   }
 }

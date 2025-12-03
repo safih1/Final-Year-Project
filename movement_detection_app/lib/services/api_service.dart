@@ -111,30 +111,64 @@ class ApiService {
   // ==============================
 
   Future<Map<String, dynamic>> triggerEmergency({
-    required String alertType,
-    double? latitude,
-    double? longitude,
-    String? address,
-    String? description,
-  }) async {
-    try {
-      final response = await http.post(
-        Uri.parse(ApiConfig.emergencyTriggerUrl),
-        headers: await getHeaders(),
-        body: json.encode({
-          'alert_type': alertType,
-          'location_latitude': latitude?.toString(),
-          'location_longitude': longitude?.toString(),
-          'location_address': address,
-          'description': description,
-        }),
-      );
-
-      return json.decode(response.body);
-    } catch (e) {
-      return {'error': 'Network error: $e'};
+  required String alertType,
+  double? latitude,
+  double? longitude,
+  String? address,
+  String? description,
+}) async {
+  try {
+    // Build payload dynamically - only include non-null values
+    final Map<String, dynamic> payload = {
+      'alert_type': alertType.toLowerCase(),
+    };
+    
+    // Only add fields if they have values
+    if (latitude != null) {
+      payload['location_latitude'] = latitude;
     }
+    
+    if (longitude != null) {
+      payload['location_longitude'] = longitude;
+    }
+    
+    if (address != null && address.isNotEmpty) {
+      payload['location_address'] = address;
+    }
+    
+    if (description != null && description.isNotEmpty) {
+      payload['description'] = description;
+    }
+    
+    print('🔥 Triggering Emergency');
+    print('📤 URL: ${ApiConfig.emergencyTriggerUrl}');
+    print('📤 Payload: $payload');
+    
+    final headers = await getHeaders();
+    print('📤 Headers: $headers');
+    
+    final response = await http.post(
+      Uri.parse(ApiConfig.emergencyTriggerUrl),
+      headers: headers,
+      body: json.encode(payload),
+    );
+
+    print('📥 Response Status: ${response.statusCode}');
+    print('📥 Response Body: ${response.body}');
+
+    if (response.statusCode == 201 || response.statusCode == 200) {
+      return json.decode(response.body);
+    } else {
+      return {
+        'error': 'HTTP ${response.statusCode}',
+        'details': response.body
+      };
+    }
+  } catch (e) {
+    print('❌ triggerEmergency Error: $e');
+    return {'error': 'Network error: $e'};
   }
+}
 
   // ==============================
   // ✅ EMERGENCY CONTACTS CRUD

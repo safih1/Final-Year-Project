@@ -1,6 +1,7 @@
 
 export interface Emergency {
   id: string;
+  alertId: number; // added to store backend alert identifier
   location: string;
   timestamp: number;
   coordinates: {
@@ -9,6 +10,7 @@ export interface Emergency {
   };
   userId?: number;
   userName?: string;
+  status?: string;
 }
 
 export enum OfficerStatus {
@@ -18,6 +20,6 @@ export enum OfficerStatus {
 }
 
 export interface Coordinates {
-    lat: number;
-    lng: number;
+  lat: number;
+  lng: number;
 }

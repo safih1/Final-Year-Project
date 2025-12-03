@@ -43,7 +43,12 @@ class EmergencyAlert(models.Model):
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, 
                            related_name='emergency_alerts')
-    alert_type = models.CharField(max_length=20, choices=ALERT_TYPE, default='manual')
+    alert_type = models.CharField(
+        max_length=20, 
+        choices=ALERT_TYPE, 
+        default='panic',
+        blank=True  # ✅ ADD THIS LINE
+    )
     status = models.CharField(max_length=20, choices=ALERT_STATUS, default='active')
     location_latitude = models.DecimalField(max_digits=10, decimal_places=8, null=True, blank=True)
     location_longitude = models.DecimalField(max_digits=11, decimal_places=8, null=True, blank=True)
