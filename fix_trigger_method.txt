@@ -1,0 +1,90 @@
+  // Fix for lines 480-550: Complete _triggerEmergencyLogic method
+  void _triggerEmergencyLogic() async {
+  if (widget.loggedInUser == null || widget.loggedInUser!['email'] == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Error: User not logged in properly.')),
+    );
+    return;
+  }
+
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(content: Text('Fetching location & triggering alert...')),
+  );
+
+  try {
+    final position = await _getCurrentPosition();
+    final double currentLat = position.latitude;
+    final double currentLng = position.longitude;
+    final String currentLocation =
+        "Lat: ${currentLat.toStringAsFixed(5)}, Lng: ${currentLng.toStringAsFixed(5)}";
+
+    final result = await _apiService.triggerEmergency(
+      alertType: 'manual',
+      address: currentLocation,
+      latitude: currentLat,
+      longitude: currentLng,
+      description: 'Manual emergency trigger from app',
+    );
+
+    if (result['alert'] != null) {
+      // Connect WebSocket for this emergency
+      _wsService.connect(result['alert']['id']);
+      
+      // Setup prediction handler
+      _wsService.onPredictionReceived = (data) {
+        print('🔮 Prediction received: $data');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Prediction: ${data['prediction']['severity']} severity (${(data['prediction']['confidence'] * 100).toStringAsFixed(1)}%)'),
+              backgroundColor: Colors.purple,
+              duration: Duration(seconds: 5),
+            ),
+          );
+        }
+      };
+
+      // Request initial prediction
+      Future.delayed(Duration(seconds: 1), () {
+        _wsService.requestPrediction();
+      });
+
+      _wsService.sendEmergencyTrigger(
+        alertId: result['alert']['id'],
+        userId: widget.loggedInUser!['id'],
+        userName: widget.loggedInUser!['full_name'] ??
+            widget.loggedInUser!['fullName'] ??
+            'Unknown User',
+        location: currentLocation,
+        coordinates: {
+          'lat': currentLat,
+          'lng': currentLng,
+        },
+      );
+
+      widget.onUpdateEmergencyData(widget.loggedInUser!['email'], currentLocation);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Emergency alert sent with your live location!'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 5),
+          ),
+        );
+      }
+
+      print("Emergency triggered for user: ${widget.loggedInUser!['email']} at $currentLocation");
+    } else {
+      throw Exception('Failed to create emergency alert');
+    }
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Error triggering emergency: $e'),
+        backgroundColor: Colors.red,
+      ),
+    );
+    print("Error triggering emergency: $e");
+  }
+}

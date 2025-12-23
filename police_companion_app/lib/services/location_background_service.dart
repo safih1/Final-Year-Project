@@ -8,7 +8,9 @@ import '../services/api_service.dart';
 class LocationBackgroundService {
   static Future<void> initialize() async {
     final service = FlutterBackgroundService();
-
+    
+    
+    
     await service.configure(
       androidConfiguration: AndroidConfiguration(
         onStart: onStart,
@@ -49,9 +51,9 @@ void onStart(ServiceInstance service) async {
 
   Timer.periodic(const Duration(seconds: 15), (timer) async {
     try {
-      Position pos = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      );
+      Position pos = await Geolocator.getPositionStream(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      ).first;
 
       print("Location updated: ${pos.latitude}, ${pos.longitude}");
 

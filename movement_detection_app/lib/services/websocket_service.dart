@@ -7,13 +7,14 @@ class WebSocketService {
 
   Function(Map<String, dynamic>)? onPoliceLocationUpdate;
   Function(Map<String, dynamic>)? onEmergencyResolved;
+  Function(Map<String, dynamic>)? onPredictionReceived;
 
-  void connect(int userId) {
+  void connect(int id) {
     try {
-      print('🔌 Connecting to WebSocket: ${ApiConfig.websocketUrl}$userId/');
+      print('🔌 Connecting to WebSocket: ${ApiConfig.websocketUrl}$id/');
       
       _channel = WebSocketChannel.connect(
-        Uri.parse('${ApiConfig.websocketUrl}$userId/'),
+        Uri.parse('${ApiConfig.websocketUrl}$id/'),
       );
 
       _channel!.stream.listen(
@@ -30,6 +31,9 @@ class WebSocketService {
                 break;
               case 'emergency_resolved':
                 onEmergencyResolved?.call(data);
+                break;
+              case 'prediction_result':
+                onPredictionReceived?.call(data);
                 break;
               default:
                 print('⚠️ Unknown WebSocket message type: $type');
@@ -52,6 +56,7 @@ class WebSocketService {
     }
   }
 
+  // Send emergency trigger to backend
   void sendEmergencyTrigger({
     required int alertId,
     required int userId,
@@ -63,7 +68,6 @@ class WebSocketService {
       print('⚠️ WebSocket not connected. Cannot send emergency trigger.');
       return;
     }
-
     try {
       final message = jsonEncode({
         'type': 'emergency_trigger',
@@ -74,7 +78,6 @@ class WebSocketService {
         'coordinates': coordinates,
         'timestamp': DateTime.now().toIso8601String(),
       });
-
       _channel!.sink.add(message);
       print('📤 Sent emergency trigger via WebSocket');
     } catch (e) {
@@ -82,23 +85,40 @@ class WebSocketService {
     }
   }
 
+  // Send no-threat message
   void sendNoThreat({required int userId}) {
     if (_channel == null) {
       print('⚠️ WebSocket not connected. Cannot send no-threat message.');
       return;
     }
-
     try {
       final message = jsonEncode({
         'type': 'no_threat',
         'user_id': userId,
         'timestamp': DateTime.now().toIso8601String(),
       });
-
       _channel!.sink.add(message);
       print('📤 Sent no-threat message via WebSocket');
     } catch (e) {
       print('❌ Error sending no-threat message: $e');
+    }
+  }
+
+  // Request a prediction after emergency is triggered
+  void requestPrediction() {
+    if (_channel == null) {
+      print('⚠️ WebSocket not connected. Cannot request prediction.');
+      return;
+    }
+    try {
+      final message = jsonEncode({
+        'type': 'request_prediction',
+        'timestamp': DateTime.now().toIso8601String(),
+      });
+      _channel!.sink.add(message);
+      print('📤 Requested prediction via WebSocket');
+    } catch (e) {
+      print('❌ Error requesting prediction: $e');
     }
   }
 

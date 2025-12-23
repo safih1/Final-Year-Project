@@ -41,20 +41,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Timer? _locationUpdateTimer;
   DateTime? _lastUpdateTime;
-  StreamSubscription? _serviceListener;
-  CombinedDetectionService detectionService = CombinedDetectionService();
+    _listenToBackgroundService(); // ✅ NEW: Listen for threat detection events
 
-  @override
-  void initState() {
-    super.initState();
-    if (widget.loggedInUser != null && widget.loggedInUser!['id'] != null) {
-      _wsService.connect(widget.loggedInUser!['id']);
-      _wsService.onPoliceLocationUpdate = _handlePoliceLocation;
-      _wsService.onEmergencyResolved = _handleEmergencyResolved;
-    }
-
-    _startUpdateMonitor();
-    _listenToBackgroundService();
   }
 
   @override
@@ -77,7 +65,6 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     });
   }
-
 
 
   
@@ -498,60 +485,14 @@ class _HomeScreenState extends State<HomeScreen> {
         "Lat: ${currentLat.toStringAsFixed(5)}, Lng: ${currentLng.toStringAsFixed(5)}";
 
     final result = await _apiService.triggerEmergency(
-      alertType: 'manual',
+      alertType: 'manual',  // ✅ FIXED - Changed from 'automstic' to 'manual'
       address: currentLocation,
       latitude: currentLat,
-      longitude: currentLng,
-      description: 'Manual emergency trigger from app',
-    );
-
-    if (result['alert'] != null) {
-      // Connect WebSocket for this emergency
-      _wsService.connect(result['alert']['id']);
-      
-      // Setup prediction handler
-      _wsService.onPredictionReceived = (data) {
-        print('🔮 Prediction received: $data');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Prediction: ${data['prediction']['severity']} severity (${(data['prediction']['confidence'] * 100).toStringAsFixed(1)}%)'),
-              backgroundColor: Colors.purple,
-              duration: Duration(seconds: 5),
-            ),
-          );
-        }
-      };
-
-      // Request initial prediction
-      Future.delayed(Duration(seconds: 1), () {
-        _wsService.requestPrediction();
-      });
-
-      _wsService.sendEmergencyTrigger(
-        alertId: result['alert']['id'],
-        userId: widget.loggedInUser!['id'],
-        userName: widget.loggedInUser!['full_name'] ??
-            widget.loggedInUser!['fullName'] ??
-            'Unknown User',
-        location: currentLocation,
-        coordinates: {
-          'lat': currentLat,
-          'lng': currentLng,
-        },
+          content: Text('Emergency alert sent with your live location!'),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 5),
+        ),
       );
-
-      widget.onUpdateEmergencyData(widget.loggedInUser!['email'], currentLocation);
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Emergency alert sent with your live location!'),
-            backgroundColor: Colors.orange,
-            duration: Duration(seconds: 5),
-          ),
-        );
-      }
 
       print("Emergency triggered for user: ${widget.loggedInUser!['email']} at $currentLocation");
     } else {

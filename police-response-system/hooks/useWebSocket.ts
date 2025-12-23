@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { Emergency, Coordinates } from '../types';
 
 // Get backend IP from environment or use default
-const BACKEND_IP = import.meta.env.VITE_BACKEND_IP || '192.168.1.8:8000';
+const BACKEND_IP = import.meta.env.VITE_BACKEND_IP || '172.20.78.61';
 
 export const useWebSocket = () => {
   const ws = useRef<WebSocket | null>(null);

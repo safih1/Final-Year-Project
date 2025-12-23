@@ -172,3 +172,104 @@ class UserConsumer(AsyncWebsocketConsumer):
             'type': 'threat_resolved',
             'message': 'Your emergency has been marked as resolved'
         }))
+
+class EmergencyConsumer(AsyncWebsocketConsumer):
+    """
+    WebSocket consumer for emergency predictions and monitoring
+    Connects to: ws://backend/ws/emergency/{emergency_id}/
+    """
+    
+    async def connect(self):
+        self.emergency_id = self.scope['url_route']['kwargs'].get('emergency_id')
+        self.emergency_group = f'emergency_{self.emergency_id}'
+        
+        # Join emergency-specific group
+        await self.channel_layer.group_add(
+            self.emergency_group,
+            self.channel_name
+        )
+        
+        await self.accept()
+        logger.info(f"✅ Emergency {self.emergency_id} WebSocket connected")
+    
+    async def disconnect(self, close_code):
+        await self.channel_layer.group_discard(
+            self.emergency_group,
+            self.channel_name
+        )
+        logger.info(f"❌ Emergency {self.emergency_id} WebSocket disconnected")
+    
+    async def receive(self, text_data):
+        try:
+            data = json.loads(text_data)
+            message_type = data.get('type')
+            
+            if message_type == 'request_prediction':
+                # Handle prediction request
+                await self.handle_prediction_request(data)
+            elif message_type == 'status_update':
+                # Handle status updates
+                await self.handle_status_update(data)
+                
+        except Exception as e:
+            logger.error(f"Error in EmergencyConsumer receive: {e}")
+    
+    async def handle_prediction_request(self, data):
+        """Handle ML prediction requests"""
+        try:
+            # Your prediction logic here
+            # This is where you'd call your ML model
+            prediction_result = await self.get_prediction(data)
+            
+            await self.send(text_data=json.dumps({
+                'type': 'prediction_result',
+                'emergency_id': self.emergency_id,
+                'prediction': prediction_result,
+                'timestamp': data.get('timestamp')
+            }))
+            logger.info(f"📤 Prediction sent for emergency {self.emergency_id}")
+            
+        except Exception as e:
+            logger.error(f"Prediction error: {e}")
+            await self.send(text_data=json.dumps({
+                'type': 'prediction_error',
+                'error': str(e)
+            }))
+    
+    async def handle_status_update(self, data):
+        """Handle emergency status updates"""
+        pass
+    
+    @database_sync_to_async
+    def get_prediction(self, data):
+        """
+        Your ML prediction logic goes here
+        This should call your trained model and return predictions
+        """
+        # Example structure - replace with your actual prediction code
+        # from your_app.ml_model import predict
+        # result = predict(data)
+        # return result
+        
+        # Placeholder return
+        return {
+            'severity': 'high',
+            'estimated_response_time': '5 minutes',
+            'confidence': 0.85
+        }
+    
+    # Event handlers for broadcasting to this emergency channel
+    async def prediction_update(self, event):
+        """Broadcast prediction updates to connected clients"""
+        await self.send(text_data=json.dumps({
+            'type': 'prediction_update',
+            'data': event['data']
+        }))
+    
+    async def emergency_status_change(self, event):
+        """Broadcast status changes"""
+        await self.send(text_data=json.dumps({
+            'type': 'status_change',
+            'status': event['status'],
+            'timestamp': event['timestamp']
+        }))

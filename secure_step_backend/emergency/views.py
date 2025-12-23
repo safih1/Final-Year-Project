@@ -71,13 +71,18 @@ class EmergencyContactDetailView(generics.RetrieveUpdateDestroyAPIView):
         }, status=status.HTTP_204_NO_CONTENT)
 
 
+# Replace the trigger_emergency function in views.py
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def trigger_emergency(request):
-    """Trigger an emergency alert with WebSocket broadcast"""
+    """
+    Trigger an emergency alert - SIMPLIFIED VERSION
+    Works without WebSocket/Redis dependency
+    """
     try:
         logger.info(f"=" * 80)
-        logger.info(f"EMERGENCY TRIGGER - User: {request.user.email}")
+        logger.info(f"🚨 EMERGENCY TRIGGER - User: {request.user.email}")
         logger.info(f"Request data: {request.data}")
         logger.info(f"=" * 80)
         
@@ -87,7 +92,7 @@ def trigger_emergency(request):
         serializer = EmergencyAlertSerializer(data=data, context={'request': request})
         
         if not serializer.is_valid():
-            logger.error(f"Validation errors: {serializer.errors}")
+            logger.error(f"❌ Validation errors: {serializer.errors}")
             return Response({
                 'error': 'Validation failed',
                 'details': serializer.errors,
@@ -103,45 +108,72 @@ def trigger_emergency(request):
         user.save()
         logger.info(f"✅ Updated emergency count: {user.emergency_count}")
         
-        # BROADCAST VIA WEBSOCKET
+        # ============================================
+        # WEBSOCKET BROADCAST (NON-BLOCKING)
+        # ============================================
         try:
             channel_layer = get_channel_layer()
-            async_to_sync(channel_layer.group_send)(
-                "police_dashboard",
-                {
-                    'type': 'emergency_alert',
-                    'alert_id': alert.id,
-                    'user_id': user.id,
-                    'user_name': user.full_name,
-                    'location': alert.location_address or 'Unknown',
-                    'coordinates': {
-                        'lat': float(alert.location_latitude) if alert.location_latitude else 34.1688,
-                        'lng': float(alert.location_longitude) if alert.location_longitude else 73.2215,
-                    },
-                    'timestamp': alert.created_at.isoformat(),
-                }
-            )
-            logger.info(f"✅ WebSocket broadcast sent")
-        except Exception as e:
-            logger.error(f"⚠️ WebSocket broadcast failed: {e}")
-            # Don't fail the request
+            if channel_layer is not None:
+                async_to_sync(channel_layer.group_send)(
+                    "police_dashboard",
+                    {
+                        'type': 'emergency_alert',
+                        'alert_id': alert.id,
+                        'user_id': user.id,
+                        'user_name': user.full_name,
+                        'location': alert.location_address or 'Unknown',
+                        'coordinates': {
+                            'lat': float(alert.location_latitude) if alert.location_latitude else 34.1688,
+                            'lng': float(alert.location_longitude) if alert.location_longitude else 73.2215,
+                        },
+                        'timestamp': alert.created_at.isoformat(),
+                    }
+                )
+                logger.info(f"✅ WebSocket broadcast sent")
+            else:
+                logger.warning(f"⚠️ Channel layer not configured - skipping WebSocket")
+        except Exception as ws_error:
+            logger.warning(f"⚠️ WebSocket broadcast failed (non-critical): {ws_error}")
+            # Don't fail the request due to WebSocket issues
         
-        # Send SMS notifications asynchronously
+        # ============================================
+        # SMS NOTIFICATIONS (NON-BLOCKING)
+        # ============================================
         try:
             send_emergency_notifications.delay(alert.id)
             logger.info(f"✅ Notifications queued")
-        except Exception as e:
-            logger.warning(f"⚠️ Could not queue notifications: {e}")
-            # Don't fail the request
+        except Exception as notif_error:
+            logger.warning(f"⚠️ Could not queue notifications (non-critical): {notif_error}")
+            # Don't fail the request due to notification issues
         
-        return Response({
+        # ============================================
+        # ✅ ALWAYS RETURN SUCCESS IF ALERT CREATED
+        # ============================================
+        response_data = {
             'message': 'Emergency alert triggered successfully',
-            'alert': serializer.data
-        }, status=status.HTTP_201_CREATED)
+            'alert': {
+                'id': alert.id,
+                'alert_type': alert.alert_type,
+                'status': alert.status,
+                'location_latitude': float(alert.location_latitude) if alert.location_latitude else None,
+                'location_longitude': float(alert.location_longitude) if alert.location_longitude else None,
+                'location_address': alert.location_address,
+                'created_at': alert.created_at.isoformat(),
+            },
+            'user': {
+                'id': user.id,
+                'full_name': user.full_name,
+                'email': user.email,
+                'emergency_count': user.emergency_count,
+            }
+        }
+        
+        logger.info(f"✅ SUCCESS - Returning response with alert ID: {alert.id}")
+        return Response(response_data, status=status.HTTP_201_CREATED)
         
     except Exception as e:
         logger.error(f"!" * 80)
-        logger.error(f"CRITICAL ERROR in trigger_emergency")
+        logger.error(f"❌ CRITICAL ERROR in trigger_emergency")
         logger.error(f"Error: {str(e)}")
         logger.error(f"Type: {type(e).__name__}")
         
@@ -153,8 +185,8 @@ def trigger_emergency(request):
             'error': 'Server error',
             'message': str(e),
             'type': type(e).__name__
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)       
+
 
 class EmergencyAlertListView(generics.ListAPIView):
     serializer_class = EmergencyAlertSerializer

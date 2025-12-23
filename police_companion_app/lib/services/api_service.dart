@@ -4,7 +4,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class ApiService {
   // IMPORTANT: Update this to your backend IP
-  static const String baseUrl = 'http://192.168.1.8:8000/api/emergency';
+  static const String baseUrl = 'http://172.20.10.4:8000/api/emergency';
   final _storage = const FlutterSecureStorage();
 
   Future<Map<String, dynamic>> login(String email, String password) async {

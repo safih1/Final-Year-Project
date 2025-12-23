@@ -1,0 +1,39 @@
+  // Fix for lines 42-60: Complete initState method
+  Timer? _locationUpdateTimer;
+  DateTime? _lastUpdateTime;
+  StreamSubscription? _serviceListener;
+  CombinedDetectionService detectionService = CombinedDetectionService();
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.loggedInUser != null && widget.loggedInUser!['id'] != null) {
+      _wsService.connect(widget.loggedInUser!['id']);
+      _wsService.onPoliceLocationUpdate = _handlePoliceLocation;
+      _wsService.onEmergencyResolved = _handleEmergencyResolved;
+    }
+
+    _startUpdateMonitor();
+    _listenToBackgroundService();
+  }
+
+  @override
+  void dispose() {
+    _wsService.disconnect();
+    _locationUpdateTimer?.cancel();
+    _nameController.dispose();
+    _phoneController.dispose();
+    super.dispose();
+  }
+
+
+  void _listenToBackgroundService() {
+    final service = FlutterBackgroundService();
+    
+    _serviceListener = service.on('threat_detected').listen((event) {
+      if (event != null && mounted) {
+        print('📱 Received threat detection event: $event');
+        _showThreatDetectionDialog(event);
+      }
+    });
+  }

@@ -8,6 +8,9 @@ websocket_urlpatterns = [
     # User WebSocket - connects with user_id
     re_path(r'ws/user/(?P<user_id>\d+)/$', consumers.UserConsumer.as_asgi()),
     
+    # Emergency WebSocket - connects with emergency_id (for predictions)
+    re_path(r'ws/emergency/(?P<emergency_id>\d+)/$', consumers.EmergencyConsumer.as_asgi()),
+    
     # Legacy police dashboard (for web dashboard without officer_id)
     re_path(r'ws/police/$', consumers.PoliceConsumer.as_asgi()),
 ]
