@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:ui';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:speech_to_text/speech_to_text.dart';
+import 'package:sensors_plus/sensors_plus.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'combined_detection_service.dart';
@@ -19,18 +19,18 @@ class BackgroundService {
     const AndroidNotificationChannel channel = AndroidNotificationChannel(
       'my_foreground',
       'Guardian Service',
-      description: 'Listening for emergency triggers',
+      description: 'Monitoring for shake trigger',
       importance: Importance.low,
     );
 
     final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
         FlutterLocalNotificationsPlugin();
 
-    // ✅ FIXED: Proper syntax for accessing platform-specific implementation
-await flutterLocalNotificationsPlugin
-    .resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>()
-    ?.createNotificationChannel(channel);
+    await flutterLocalNotificationsPlugin
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(channel);
+        
     await service.configure(
       androidConfiguration: AndroidConfiguration(
         onStart: onStart,
@@ -38,7 +38,7 @@ await flutterLocalNotificationsPlugin
         isForegroundMode: true,
         notificationChannelId: 'my_foreground',
         initialNotificationTitle: 'SecureStep Guardian',
-        initialNotificationContent: 'Listening for "Help" trigger...',
+        initialNotificationContent: 'SHAKE your phone 3 times to trigger detection',
         foregroundServiceNotificationId: 888,
       ),
       iosConfiguration: IosConfiguration(
@@ -50,26 +50,31 @@ await flutterLocalNotificationsPlugin
   }
 
   Future<void> startService() async {
-    // Request permissions first
-    final micPermission = await Permission.microphone.request();
+    print('🎙️ [SERVICE] Requesting permissions...');
     final locationPermission = await Permission.location.request();
     
-    if (!micPermission.isGranted) {
-      throw Exception('Microphone permission denied');
-    }
+    print('📍 [SERVICE] Location permission: ${locationPermission.isGranted}');
     
     if (!locationPermission.isGranted) {
+      print('❌ [SERVICE] Location permission DENIED');
       throw Exception('Location permission denied');
     }
 
     final service = FlutterBackgroundService();
     var isRunning = await service.isRunning();
+    
+    print('🎙️ [SERVICE] Service running status: $isRunning');
+    
     if (!isRunning) {
+      print('🎙️ [SERVICE] Starting background service...');
       service.startService();
+    } else {
+      print('🎙️ [SERVICE] Service already running');
     }
   }
   
   Future<void> stopService() async {
+    print('🛑 [SERVICE] Stopping service...');
     final service = FlutterBackgroundService();
     service.invoke("stopService");
   }
@@ -79,22 +84,32 @@ await flutterLocalNotificationsPlugin
 void onStart(ServiceInstance service) async {
   DartPluginRegistrant.ensureInitialized();
 
-  final SpeechToText speech = SpeechToText();
-  bool isListening = false;
   final detectionService = CombinedDetectionService();
   final apiService = ApiService();
 
-  print('🎤 Background service started - Initializing speech recognition...');
+  print('==============================================');
+  print('📳 [BACKGROUND] Service started');
+  print('📳 [BACKGROUND] Monitoring shake gestures...');
+  print('📳 [BACKGROUND] SHAKE your phone 3 times quickly to trigger');
+  print('==============================================');
 
-  //////////////////////////// Initialize notifications
   final FlutterLocalNotificationsPlugin notifications = FlutterLocalNotificationsPlugin();
+
+  // Shake detection variables
+  int shakeCount = 0;
+  DateTime? lastShakeTime;
+  const double shakeThreshold = 20.0; // Acceleration threshold
+  const Duration shakeTimeout = Duration(seconds: 2);
 
   // Automatic threat detection callback
   detectionService.onPredictionResult = (isThreat, confidence, fullResult) async {
+    print('🔮 [DETECTION] Prediction result received');
+    print('🔮 [DETECTION] Is Threat: $isThreat');
+    print('🔮 [DETECTION] Confidence: ${(confidence * 100).toStringAsFixed(1)}%');
+    
     if (isThreat) {
-      print('⚠️ THREAT DETECTED - TRIGGERING AUTOMATIC EMERGENCY');
+      print('⚠️ [THREAT] THREAT DETECTED - Triggering emergency');
       
-      // Show critical notification
       await notifications.show(
         889,
         '🚨 THREAT DETECTED',
@@ -103,40 +118,16 @@ void onStart(ServiceInstance service) async {
           android: AndroidNotificationDetails(
             'my_foreground',
             'Guardian Service',
+            icon: '@mipmap/ic_launcher',
             importance: Importance.max,
             priority: Priority.high,
             playSound: true,
             enableVibration: true,
             fullScreenIntent: true,
-            
           ),
         ),
       );
-            service.invoke('threat_detected', {
-        'is_threat': isThreat,
-        'confidence': confidence,
-        'detected_action': fullResult['detected_action'] ?? 'Unknown',
-        'audio_confidence': fullResult['audio_confidence'] ?? 0.0,
-        'movement_confidence': fullResult['movement_confidence'] ?? 0.0,
-        'timestamp': DateTime.now().toIso8601String(),
-      });
 
-    } else {
-      print('✅ No threat detected - All clear');
-      
-      await notifications.show(
-        890,
-        '✅ All Clear',
-        'No threat detected. Confidence: ${(confidence * 100).toStringAsFixed(1)}%',
-        const NotificationDetails(
-          android: AndroidNotificationDetails(
-            'my_foreground',
-            'Guardian Service',
-            importance: Importance.low,
-            priority: Priority.low,
-          ),
-        ),
-      );
       // Get location and trigger emergency
       try {
         Position? position;
@@ -144,14 +135,16 @@ void onStart(ServiceInstance service) async {
           position = await Geolocator.getCurrentPosition(
             desiredAccuracy: LocationAccuracy.high,
           ).timeout(const Duration(seconds: 5));
+          print('📍 [LOCATION] Got position: ${position.latitude}, ${position.longitude}');
         } catch (e) {
-          print('⚠️ Could not get location: $e');
+          print('⚠️ [LOCATION] Could not get location: $e');
         }
 
         final double lat = position?.latitude ?? 34.1688;
         final double lng = position?.longitude ?? 73.2215;
         final String locationStr = "Lat: ${lat.toStringAsFixed(5)}, Lng: ${lng.toStringAsFixed(5)}";
 
+        print('🚨 [EMERGENCY] Triggering emergency API call...');
         final result = await apiService.triggerEmergency(
           alertType: 'automatic',
           address: locationStr,
@@ -162,7 +155,7 @@ void onStart(ServiceInstance service) async {
         );
 
         if (result['alert'] != null) {
-          print('✅ Emergency alert sent successfully');
+          print('✅ [EMERGENCY] Alert sent successfully - ID: ${result['alert']['id']}');
           
           await notifications.show(
             890,
@@ -172,63 +165,110 @@ void onStart(ServiceInstance service) async {
               android: AndroidNotificationDetails(
                 'my_foreground',
                 'Guardian Service',
+                icon: '@mipmap/ic_launcher',
                 importance: Importance.high,
                 priority: Priority.high,
               ),
             ),
           );
+
+          // Send threat_detected event to UI
+          service.invoke('threat_detected', {
+            'is_threat': isThreat,
+            'confidence': confidence,
+            'detected_action': fullResult['detected_action'] ?? 'Unknown',
+            'audio_confidence': fullResult['audio_confidence'] ?? 0.0,
+            'movement_confidence': fullResult['movement_confidence'] ?? 0.0,
+            'timestamp': DateTime.now().toIso8601String(),
+          });
         }
       } catch (e) {
-        print('❌ Error triggering emergency: $e');
+        print('❌ [EMERGENCY] Error triggering emergency: $e');
       }
+
+    } else {
+      print('✅ [DETECTION] No threat detected - All clear');
+      
+      await notifications.show(
+        890,
+        '✅ All Clear',
+        'No threat detected. Confidence: ${(confidence * 100).toStringAsFixed(1)}%',
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            'my_foreground',
+            'Guardian Service',
+            icon: '@mipmap/ic_launcher',
+            importance: Importance.low,
+            priority: Priority.low,
+          ),
+        ),
+      );
     }
   };
 
-  // Initialize Speech Recognition
-  bool available = await speech.initialize(
-    onStatus: (status) {
-      print('🎤 Speech status: $status');
-      if (status == 'done' || status == 'notListening') {
-        isListening = false;
-        // Restart listening after a short delay
-        Future.delayed(const Duration(seconds: 1), () {
-          _startListeningLoop(speech, service, detectionService, notifications);
-        });
+  // Listen to accelerometer for shake detection
+  print('📳 [SHAKE] Starting shake detection...');
+  accelerometerEventStream().listen((AccelerometerEvent event) {
+    // Calculate total acceleration
+    double acceleration = event.x.abs() + event.y.abs() + event.z.abs();
+    
+    // Check if acceleration exceeds threshold
+    if (acceleration > shakeThreshold) {
+      DateTime now = DateTime.now();
+      
+      // Reset shake count if too much time has passed
+      if (lastShakeTime != null && now.difference(lastShakeTime!) > shakeTimeout) {
+        shakeCount = 0;
       }
-    },
-    onError: (error) {
-      print('❌ Speech error: $error');
-      isListening = false;
-      // Restart listening after error
-      Future.delayed(const Duration(seconds: 2), () {
-        _startListeningLoop(speech, service, detectionService, notifications);
-      });
-    },
-  );
+      
+      shakeCount++;
+      lastShakeTime = now;
+      
+      print('📳 [SHAKE] Shake detected! Count: $shakeCount/3 (acceleration: ${acceleration.toStringAsFixed(2)})');
+      
+      // If 3 shakes detected within timeout period
+      if (shakeCount >= 3) {
+        print('');
+        print('🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨');
+        print('🚨 SHAKE TRIGGER DETECTED!');
+        print('🚨 3 shakes registered');
+        print('🚨 Starting 10-second detection...');
+        print('🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨');
+        print('');
+        
+        // Reset shake count
+        shakeCount = 0;
+        lastShakeTime = null;
+        
+        // Show notification
+        notifications.show(
+          888,
+          '🚨 SHAKE DETECTED!',
+          'Recording audio and movement for 10 seconds...',
+          const NotificationDetails(
+            android: AndroidNotificationDetails(
+              'my_foreground',
+              'Guardian Service',
+              icon: '@mipmap/ic_launcher',
+              importance: Importance.high,
+              priority: Priority.high,
+              playSound: true,
+              enableVibration: true,
+            ),
+          ),
+        );
 
-  if (available) {
-    print('✅ Speech recognition initialized successfully');
-    _startListeningLoop(speech, service, detectionService, notifications);
-  } else {
-    print('❌ Speech recognition not available');
-    await notifications.show(
-      888,
-      '❌ Voice Recognition Failed',
-      'Please check microphone permissions',
-      const NotificationDetails(
-        android: AndroidNotificationDetails(
-          'my_foreground',
-          'Guardian Service',
-          importance: Importance.high,
-          priority: Priority.high,
-        ),
-      ),
-    );
-  }
+        // Start combined detection
+        print('🎬 [DETECTION] Starting combined detection...');
+        detectionService.startDetection();
+      }
+    }
+  });
+
+  print('✅ [SHAKE] Shake detection active - shake phone 3 times to trigger!');
 
   service.on('stopService').listen((event) {
-    print('🛑 Stopping background service...');
-    speech.stop();
+    print('🛑 [SERVICE] Stop command received');
     detectionService.dispose();
     service.stopSelf();
   });
@@ -237,63 +277,4 @@ void onStart(ServiceInstance service) async {
 @pragma('vm:entry-point')
 bool onIosBackground(ServiceInstance service) {
   return true;
-}
-
-void _startListeningLoop(
-  SpeechToText speech, 
-  ServiceInstance service, 
-  CombinedDetectionService detectionService,
-  FlutterLocalNotificationsPlugin notifications,
-) async {
-  if (speech.isListening) {
-    print('⚠️ Already listening, skipping...');
-    return;
-  }
-
-  try {
-    print('🎤 Starting to listen for "Help"...');
-    
-    await speech.listen(
-      onResult: (result) {
-        String words = result.recognizedWords.toLowerCase();
-        print('🎤 Heard: "$words" (confidence: ${result.confidence})');
-
-        // Check for wake words
-        if (words.contains('help') || 
-            words.contains('emergency') || 
-            words.contains('danger')) {
-          print('🚨 WAKE WORD DETECTED: "$words"');
-
-          // Show notification
-          notifications.show(
-            888,
-            '🚨 THREAT DETECTION ACTIVATED',
-            'Recording audio and movement for 10 seconds...',
-            const NotificationDetails(
-              android: AndroidNotificationDetails(
-                'my_foreground',
-                'Guardian Service',
-                importance: Importance.high,
-                priority: Priority.high,
-                playSound: true,
-                enableVibration: true,
-              ),
-            ),
-          );
-
-          // Start combined detection
-          detectionService.startDetection();
-        }
-      },
-      listenFor: const Duration(seconds: 30),
-      pauseFor: const Duration(seconds: 5),
-      listenMode: ListenMode.dictation,
-      cancelOnError: false,
-      partialResults: true,
-    );
-  } catch (e) {
-    print('❌ Listen error: $e');
-    await Future.delayed(const Duration(seconds: 3));
-    _startListeningLoop(speech, service, detectionService, notifications);
-  }
 }

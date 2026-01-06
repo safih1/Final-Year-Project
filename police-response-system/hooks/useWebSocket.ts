@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { Emergency, Coordinates } from '../types';
 
 // Get backend IP from environment or use default
-const BACKEND_IP = import.meta.env.VITE_BACKEND_IP || '172.20.78.61';
+const BACKEND_IP = '192.168.1.5:8000';
 
 export const useWebSocket = () => {
   const ws = useRef<WebSocket | null>(null);
@@ -16,7 +16,7 @@ export const useWebSocket = () => {
     // Connect to police WebSocket
     const wsUrl = `ws://${BACKEND_IP}/ws/police/`;
     console.log('🔌 Connecting to WebSocket:', wsUrl);
-    
+
     ws.current = new WebSocket(wsUrl);
 
     ws.current.onopen = () => {
@@ -129,7 +129,7 @@ export const useWebSocket = () => {
 
       if (nearestOfficer) {
         console.log(`✅ Nearest officer: ${nearestOfficer.name} (${nearestOfficer.distance_km} km away)`);
-        
+
         // Assign officer via backend
         await assignOfficer(nearestOfficer.id, emergency.alertId);
       } else {
@@ -146,10 +146,10 @@ export const useWebSocket = () => {
 
     officers.forEach(officer => {
       // Check if officer has location data
-      if (officer.location && 
-          officer.location.latitude !== null && 
-          officer.location.longitude !== null) {
-        
+      if (officer.location &&
+        officer.location.latitude !== null &&
+        officer.location.longitude !== null) {
+
         const distance = calculateDistance(
           emergencyCoords.lat,
           emergencyCoords.lng,
@@ -176,15 +176,15 @@ export const useWebSocket = () => {
     const R = 6371; // Radius of Earth in km
     const dLat = toRad(lat2 - lat1);
     const dLon = toRad(lon2 - lon1);
-    
+
     const a =
       Math.sin(dLat / 2) * Math.sin(dLat / 2) +
       Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
       Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    
+
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     const distance = R * c;
-    
+
     return distance;
   };
 

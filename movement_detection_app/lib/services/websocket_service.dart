@@ -7,15 +7,24 @@ class WebSocketService {
 
   Function(Map<String, dynamic>)? onPoliceLocationUpdate;
   Function(Map<String, dynamic>)? onEmergencyResolved;
+  Function(Map<String, dynamic>)? onOfficerAssigned;
   Function(Map<String, dynamic>)? onPredictionReceived;
 
   void connect(int id) {
     try {
-      print('🔌 Connecting to WebSocket: ${ApiConfig.websocketUrl}$id/');
+      // Construct full WebSocket URL
+      final String wsUrl = '${ApiConfig.websocketUrl}$id/';
+      print('🔌 Connecting to WebSocket: $wsUrl');
       
-      _channel = WebSocketChannel.connect(
-        Uri.parse('${ApiConfig.websocketUrl}$id/'),
-      );
+      // Parse URI properly - ensure no fragments
+      final uri = Uri.parse(wsUrl);
+      
+      // Verify it's a WebSocket URI
+      if (!uri.scheme.startsWith('ws')) {
+        throw Exception('Invalid WebSocket scheme: ${uri.scheme}. Expected ws:// or wss://');
+      }
+      
+      _channel = WebSocketChannel.connect(uri);
 
       _channel!.stream.listen(
         (message) {
@@ -27,7 +36,11 @@ class WebSocketService {
 
             switch (type) {
               case 'police_location_update':
+              case 'officer_location': // Handle backend message type
                 onPoliceLocationUpdate?.call(data);
+                break;
+              case 'officer_assigned':
+                onOfficerAssigned?.call(data);
                 break;
               case 'emergency_resolved':
                 onEmergencyResolved?.call(data);

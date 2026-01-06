@@ -88,9 +88,7 @@ ASGI_APPLICATION = 'secure_step_backend.asgi.application'
 
 CHANNEL_LAYERS = {
     'default': {
-        'BACKEND': 'channels_redis.core.RedisChannelLayer',
-        
-        
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
     },
 }
 # Database

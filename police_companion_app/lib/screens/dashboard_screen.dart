@@ -80,7 +80,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         print('No officer ID found');
         return;
       }
-      final wsUrl = 'ws://192.168.1.8:8000/ws/police/$officerId/';
+      final wsUrl = 'ws://192.168.1.5:8000/ws/police/$officerId/';
       _channel = WebSocketChannel.connect(Uri.parse(wsUrl));
       _channel!.stream.listen((message) {
         print('WebSocket message: $message');
